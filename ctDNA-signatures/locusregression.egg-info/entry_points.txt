@@ -1,0 +1,2 @@
+[console_scripts]
+locusregression = locusregression.cli:main

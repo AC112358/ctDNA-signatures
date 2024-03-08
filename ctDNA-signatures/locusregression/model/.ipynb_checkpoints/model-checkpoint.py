@@ -27,6 +27,15 @@ def _get_observation_likelihood(*,model_state, sample, corpus_state):
     Shape: N_sigs x N_mutations
     '''
     rho = model_state.omega/model_state.omega.sum(axis = -1, keepdims = True)
+    print("# contexts:", sample.context.shape)
+    print("# loci:", sample.locus.shape)
+    print("context freqs:", corpus_state.context_frequencies[sample.context, sample.locus])
+    print("\t shape:", corpus_state.context_frequencies[sample.context, sample.locus].shape)
+    print("\t min value:", min(corpus_state.context_frequencies[sample.context, sample.locus]))
+    print("\t # zeros:", sum(corpus_state.context_frequencies[sample.context, sample.locus]==0))
+    print("\t total # contexts:", sum(corpus_state.context_frequencies[sample.context, sample.locus]))
+    print("\t # zeros in 1st locus:", sum(corpus_state.context_frequencies[sample.context, sample.locus[0]]==0))
+    print("\t # contexts in 1st locus:",  sum(corpus_state.context_frequencies[sample.context, sample.locus[0]]))
     
     flattend_phi = (
             np.log(rho) + \

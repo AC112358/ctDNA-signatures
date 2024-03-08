@@ -293,8 +293,8 @@ class MotifCorpusMaker:
                 bufsize=10000,
             )
 
-            positive_file = ("pos" in motif_file)
-            #print(motif_file, positive_file)
+            positive_file = ("pos_" in motif_file)
+            positive_file = True
             mutations_grouped = {}
             last_line =  ""
             max_locus_processed = 0
@@ -305,7 +305,7 @@ class MotifCorpusMaker:
                     if not line:
                         break
             
-                    line_dict = process_line(line, fa, positive_file=True)
+                    line_dict = process_line(line, fa, positive_file=True, in_corpus=True)
                     last_line = line
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
@@ -617,11 +617,13 @@ class MotifCorpusMaker:
 
                 window_sequence = None
 
+                '''
                 if positive_file:
                     window_sequence = fasta_object[chrom][max(start-4,0) : end+1].seq.upper()
                 else:
                     window_sequence = fasta_object[chrom][start : max(start,end-3)].seq.upper()
-                    
+                '''
+                window_sequence = fasta_object[chrom][start : end].seq.upper()
                 fournuc_counts += Counter([
                     fournuc for fournuc in rolling(window_sequence) if not 'N' in fournuc
                 ])

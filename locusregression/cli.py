@@ -777,7 +777,7 @@ trainer_optional.add_argument('--fix-signatures','-sigs', nargs='+', type = str,
                                     'all are learned de-novo.'
                               )
 trainer_optional.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
-trainer_optional.add_argument('--tau', type = posint, default = 16)
+trainer_optional.add_argument('--tau', type = posint, default = 1)
 trainer_optional.add_argument('--kappa', type = posfloat, default=0.5)
 trainer_optional.add_argument('--eval-every', '-eval', type = posint, default = 10,
     help = 'Evaluate the bound after every this many epochs')

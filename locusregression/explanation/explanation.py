@@ -11,7 +11,7 @@ def explain(
     model,
     corpus,
     n_jobs = 1,
-    chunk_size = 10000,
+    chunk_size = None,
 ):
     
     def _calculate_shap_values(tree_explainer, chunk):
@@ -51,14 +51,7 @@ def explain(
         X_tild[background_idx],
     )
 
-    num_chunks = corpus.locus_dim // chunk_size + 1
-
-    shap_values = vstack(
-        Parallel(n_jobs=n_jobs, verbose=10)(
-            delayed(_calculate_shap_values)(explainer, X_tild[i*chunk_size:(i+1)*chunk_size])
-            for i in range(num_chunks)
-        )
-    )
+    shap_values = _calculate_shap_values(explainer, X_tild)
 
     feature_names = model.model_state.feature_transformer.feature_names_out
 

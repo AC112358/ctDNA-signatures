@@ -7,6 +7,7 @@ import numpy as np
 import time
 import warnings
 import matplotlib.pyplot as plt
+import matplotlib
 import pickle
 import logging
 from scipy.special import xlogy
@@ -843,23 +844,28 @@ class LocusRegressor:
             fig, ax = plt.subplots(1,1, figsize = figsize)
 
         xticks = self.model_state.strand_transformer.feature_names_
-        bar = np.log2(self.model_state.tau_[component])
+        
+        bar=self.model_state.tau_[component]**2 - 1
         ax.bar(
             xticks,
             bar,
-            color = ['lightgrey' if b > 0 else 'darkred' for b in bar],
+            color = 'lightgrey',
             edgecolor = 'black',
             linewidth = 0.1,
             width = 0.5,
         )
+        ax.set(yscale = 'symlog')
 
-        ax.set_ylabel('log2 Bias', fontsize=fontsize)
+        log_bar = 2*np.log2(self.model_state.tau_[component])
+        bound = round(max(0.25, 2**(np.abs(log_bar).max()/2) + 0.25) * 4) / 4
+
+        ax.set_ylabel(r'$ \frac{[+ strand]}{[- strand]} $', fontsize=fontsize)
         ax.tick_params(axis='x', rotation=90, labelsize=fontsize)
-        
-        bound = round(max(0.25, np.abs(bar).max() + 0.25) * 4) / 4
-        ax.set(ylim = (-bound,bound))
-        ax.set_yticks([-bound,0,bound])
-        ax.set_yticklabels([-bound,0,bound], fontsize = fontsize)
+
+        logbound = np.log(bound)
+        ax.set(ylim = (-logbound,logbound))
+        ax.set_yticks([-logbound, 0, logbound])
+        ax.set_yticklabels([f'{1/bound:.3f}', '1', f'{bound:.3f}'], fontsize=fontsize)
         ax.axhline(0, color='black', linewidth=0.5)
 
         for spine in ax.spines.values():

@@ -1,6 +1,5 @@
 from ._cli_utils import *
 from .corpus import *
-from .corpus import logger as reader_logger
 from .corpus.sbs.mutation_preprocessing import get_marginal_mutation_rate, get_mutation_clusters, transfer_annotations_to_vcf
 from .model import load_model, logger
 from .model._importance_sampling import get_posterior_sample
@@ -21,6 +20,9 @@ from functools import partial
 from joblib import Parallel, delayed
 import joblib
 import numpy as np
+import tempfile
+from contextlib import contextmanager
+import time
 
 from optuna.exceptions import ExperimentalWarning
 warnings.filterwarnings("ignore", category=ExperimentalWarning)
@@ -32,18 +34,27 @@ parser = argparse.ArgumentParser(
 subparsers = parser.add_subparsers(help = 'Commands')
 
 
-def get_marginal_mutation_rate_wrapper(*,vcf_files, chr_prefix, regions_file, output):    
+def get_marginal_mutation_rate_wrapper(*,
+            vcf_files, 
+            chr_prefix, 
+            genome_file, 
+            output,
+            smoothing_size,
+        ):
+    
     get_marginal_mutation_rate(
-        regions_file,
+        genome_file,
         output,
         *vcf_files,
+        smoothing_size=smoothing_size,
         chr_prefix=chr_prefix
     )
 
 prep_mutrate_parser = subparsers.add_parser('preprocess-estimate-mutrate', help = 'Calculate the marginal mutation rate across all samples for some corpus.')
 prep_mutrate_parser.add_argument('--vcf-files', '-vcfs', type = file_exists, nargs='+', required=True, help = 'List of VCF files containing SBS mutations.')
 prep_mutrate_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
-prep_mutrate_parser.add_argument('--regions-file','-r', type = file_exists, required=True, help = 'Bed file of regions to calculate mutation rate over.')
+prep_mutrate_parser.add_argument('--smoothing-size', type = posint, default=20000, help = 'Size of window to smooth mutation rate over.')
+prep_mutrate_parser.add_argument('--genome-file','-g', type = file_exists, required=True, help = 'Also known as a "Chrom sizes" file.')
 prep_mutrate_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
 prep_mutrate_parser.set_defaults(func = get_marginal_mutation_rate_wrapper)
 
@@ -88,44 +99,243 @@ make_windows_parser = subparsers.add_parser('get-regions', help = 'Make windows 
 make_windows_parser.add_argument('--genome-file','-g', type = file_exists, required = True, help = 'Also known as a "Chrom sizes" file.')    
 make_windows_parser.add_argument('--blacklist-file','-v', type = file_exists, required=True, help = 'Bed file of regions to exclude from windows.')
 make_windows_parser.add_argument('--window-size','-w', type = posint, required = True, help = 'Size of windows to make.')
-make_windows_parser.add_argument('--categorical-features','-cf', nargs='+', type = str, default = [], 
+make_windows_parser.add_argument('--categorical-features','-cf', nargs='+', type = file_exists, default = [], 
                                  help = 'List of categorical feature bedfiles to account for while making windows.')
 make_windows_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout, 
                                  help = 'Where to save windows.')
 make_windows_parser.set_defaults(func = make_windows_wrapper)
 
 
-fournuc_sub = subparsers.add_parser('get-fournucs', help = 'Write 4-nucleotide context file for a given genome.')
-fournuc_sub.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
-fournuc_sub.add_argument('--regions-file','-r', type = file_exists, required = True)
-fournuc_sub.add_argument('--n-jobs','-j', type = posint, default = 1, help = 'Number of parallel processes to use. Currently does nothing.')
-fournuc_sub.add_argument('--output','-o', type = valid_path, required = True, help = 'Where to save compiled corpus.')
-fournuc_sub.set_defaults(func = MotifCorpusMaker.create_fournuc_file)
+def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file):
+
+    regions = read_windows(regions_file)
+
+    SampleClass = Corpus._get_observation_class(dtype)
+
+    context_frequencies = SampleClass.get_context_frequencies(
+        window_set=regions,
+        fasta_file=fasta_file,
+    )
+
+    create_corpus(
+        filename=filename,
+        name=corpus_name,
+        type=dtype,
+        context_frequencies=context_frequencies,
+        regions=regions,
+    )
+
+corpus_init_parser = subparsers.add_parser('corpus-create', help = 'Create a corpus file from a fasta and regions file.')
+corpus_init_parser.add_argument('filename', type = valid_path, help = 'Where to save compiled corpus.')
+corpus_init_parser.add_argument('--corpus-name','-n', type = str, required = True, help = 'Name of corpus, must be unique if modeling with other corpuses.')
+corpus_init_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
+corpus_init_parser.add_argument('--regions-file','-r', type = file_exists, required = True)
+corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif','fragment-length','indel',])
+corpus_init_parser.set_defaults(func = create_corpus_wrapper)
+
+
+def list_features_wrapper(*,corpus):
+    with h5.File(corpus, 'r') as f:
+        if not 'features' in f or len(f['features']) == 0:
+            print('No features found in corpus.', file = sys.stderr)
+            os._exit(1)
+            
+        else:
+            print('+' + '-' * 40 + '+' + '-' * 20 + '+' + '-' * 20 + '+')
+            print('|{:^40s}|{:^20s}|{:^20s}|'.format('feature_name', 'group', 'normalization'))
+            print('+' + '-' * 40 + '+' + '-' * 20 + '+' + '-' * 20 + '+')
+            for feature in f['features'].keys():
+                print('|{:^40s}|{:^20s}|{:^20s}|'.format(
+                    feature,
+                    f['features'][feature].attrs['group'],
+                    f['features'][feature].attrs['type']
+                ))
+            print('+' + '-' * 40 + '+' + '-' * 20 + '+' + '-' * 20 + '+')
+        
+list_features_parser = subparsers.add_parser('corpus-list-features', help = 'List features in a corpus.')
+list_features_parser.add_argument('corpus', type = file_exists)
+list_features_parser.set_defaults(func = list_features_wrapper)
+
+def remove_feature_wrapper(*,corpus, feature_names):
+    with buffered_writer(corpus) as f:
+        for feature_name in feature_names:
+            try:
+                del f['features'][feature_name]
+            except KeyError:
+                print(f'Feature {feature_name} not found in corpus.', file = sys.stderr)
+                return
+
+remove_feature_parser = subparsers.add_parser('corpus-rm-features', help = 'Remove a feature from a corpus.')
+remove_feature_parser.add_argument('corpus', type = file_exists)
+remove_feature_parser.add_argument('feature-names', type = str, nargs='+')
+remove_feature_parser.set_defaults(func = remove_feature_wrapper)
+
+
+def rename_corpus_wrapper(*,corpus,name):
+    with buffered_writer(corpus) as f:
+        data_group = f['metadata']
+        data_group.attrs['name'] = name
+
+rename_parser = subparsers.add_parser('corpus-rename', help = 'Rename a corpus.')
+rename_parser.add_argument('corpus', type = file_exists)
+rename_parser.add_argument('name', type = str)
+rename_parser.set_defaults(func = rename_corpus_wrapper)
+
+
+@contextmanager
+def _get_regions_filename(corpus):
+
+    try:
+        regions_file = tempfile.NamedTemporaryFile()
+
+        with h5.File(corpus, 'r') as h5_object, \
+            open(regions_file.name, 'w') as regions_out:
+            
+            for region in read_regions(h5_object):
+                print(region, sep = '\t', file = regions_out)
+
+        yield regions_file.name
+    finally:
+        regions_file.close()
+
+
+@contextmanager
+def buffered_writer(filename, timeout=3600):
+    init_time = time.time()
+    opened=False
+    
+    while not opened:
+        try:
+            h5_object = h5.File(filename, 'a')
+            opened = True
+            yield h5_object
+        except OSError:
+            if time.time() - init_time > timeout:
+                raise TimeoutError('Could not open file for writing.')
+            else:
+                time.sleep(1)
+        finally:
+            if opened:
+                h5_object.close()
+    
+
+
+
+def process_bedgraph(
+    group='all',
+    normalization='power',
+    extend=0,*,
+    corpus,
+    genome_file,
+    bedgraph_file,
+    feature_name,
+):
+    with _get_regions_filename(corpus) as regions_file:
+
+        feature_vals = make_continous_features_bedgraph(
+            bedgraph_file=bedgraph_file,
+            regions_file=regions_file,
+            genome_file=genome_file,
+            extend=extend,
+            null='nan',
+        )
+
+    with buffered_writer(corpus) as h5_object:
+        write_feature(
+            h5_object,
+            name = feature_name,
+            group = group,
+            type = normalization,
+            values = feature_vals,
+        )
+
+bedgraph_sub = subparsers.add_parser('corpus-ingest-bedgraph', help = 'Summarize bigwig file for a given cell type.')
+bedgraph_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
+bedgraph_sub.add_argument('bedgraph-file', type = file_exists)
+bedgraph_sub.add_argument('--genome-file','-gf', type = file_exists, required=True)
+bedgraph_sub.add_argument('--feature-name','-name', type = str, required=True,)
+bedgraph_sub.add_argument('--group','-g', type = str, default='all', help = 'Group name for feature.')
+bedgraph_sub.add_argument('--extend','-e', type = posint, default=0, help = 'Extend each region by this many basepairs.')
+bedgraph_sub.add_argument('--normalization','-norm', type = str, choices=['power','minmax','quantile','standardize'], 
+                        default='power', 
+                        help = 'Normalization to apply to feature.'
+                        )
+bedgraph_sub.set_defaults(func = process_bedgraph)
+
+
+def process_vector(group='all',*,
+                   normalization,
+                   vector_file,
+                   feature_name,
+                   corpus):
+
+    type_map = {
+            'categorical' : str,
+            'cardinality' : str,
+        }
+
+    feature_vals=[]
+    with open(vector_file, 'r') as f:
+        for line in f:
+            _feature = line.strip()
+
+            feature_vals.append(
+                type_map.setdefault(normalization, float)(_feature) if not _feature=='.' else type_map.setdefault(normalization, float)('nan')
+            )
+
+    feature_vals = np.array(feature_vals)
+    assert len(feature_vals) == peek_locus_dim(corpus)
+    
+    with buffered_writer(corpus) as h5_object:
+        write_feature(
+            h5_object,
+            name = feature_name,
+            group = group,
+            type = normalization,
+            values = feature_vals,
+        )
+
+vector_sub = subparsers.add_parser('corpus-ingest-vector', help = 'Ingest a vector file as a feature.')
+vector_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
+vector_sub.add_argument('vector-file', type = file_exists, help = 'A text file where each line is a feature value, should be the exact same length as the number of regions in the corpus')
+vector_sub.add_argument('--feature-name','-name', type = str, required=True,)
+vector_sub.add_argument('--group','-g', type = str, default='all', help = 'Group name for feature.')
+vector_sub.add_argument('--normalization','-norm', type = str, choices=['power','minmax','quantile','standardize','categorical','cardinality'], 
+                        required=True,
+                        help = 'Normalization to apply to feature.'
+                        )
+vector_sub.set_defaults(func = process_vector)
 
 
 def process_bigwig(group='all',
                    normalization='power',
                    extend=0,*,
                    bigwig_file, 
-                   regions_file, 
                    feature_name, 
-                   output):
+                   corpus):
+    
+    
+    with _get_regions_filename(corpus) as regions_file:
 
-    feature_vals = make_continous_features(
-        bigwig_file=bigwig_file,
-        regions_file=regions_file,
-        extend=extend,
-    )
+        feature_vals = make_continous_features(
+            bigwig_file=bigwig_file,
+            regions_file=regions_file,
+            extend=extend,
+        )
 
-    print('#feature=' + feature_name, file=output)
-    print(f'#type={normalization}', file=output)
-    print('#group=' + group, file = output)
-    print(*feature_vals, sep = '\n', file = output)
+    with buffered_writer(corpus) as h5_object:
+        write_feature(
+            h5_object,
+            name = feature_name,
+            group = group,
+            type = normalization,
+            values = feature_vals,
+        )
 
 
-bigwig_sub = subparsers.add_parser('ingest-bigwig', help = 'Summarize bigwig file for a given cell type.')
+bigwig_sub = subparsers.add_parser('corpus-ingest-bigwig', help = 'Summarize bigwig file for a given cell type.')
+bigwig_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
 bigwig_sub.add_argument('bigwig-file', type = file_exists)
-bigwig_sub.add_argument('--regions-file','-r', type = file_exists, required=True,)
 bigwig_sub.add_argument('--feature-name','-name', type = str, required=True,)
 bigwig_sub.add_argument('--group','-g', type = str, default='all', help = 'Group name for feature.')
 bigwig_sub.add_argument('--extend','-e', type = posint, default=0, help = 'Extend each region by this many basepairs.')
@@ -133,7 +343,6 @@ bigwig_sub.add_argument('--normalization','-norm', type = str, choices=['power',
                         default='power', 
                         help = 'Normalization to apply to feature.'
                         )
-bigwig_sub.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
 bigwig_sub.set_defaults(func = process_bigwig)
 
 
@@ -142,168 +351,168 @@ def process_distance_feature(
         normalization='quantile',
         reverse=False,*,
         bed_file,
-        regions_file,
         feature_name,
-        output,
+        corpus,
 ):
     
-    upstream, downstream = make_distance_features(
-        genomic_features=bed_file,
-        reverse=reverse,
-        regions_file=regions_file,
-    )
+    with _get_regions_filename(corpus) as regions_file:
+        progress_between, interdistance = make_distance_features(
+            genomic_features=bed_file,
+            reverse=reverse,
+            regions_file=regions_file,
+        )
 
-    print(f'#feature={feature_name}_progressBetween\t#feature={feature_name}_interFeatureDistance', file=output)
-    print(f'#type=none\t#type={normalization}', file=output)
-    print(f'#group={group}\t#group={group}', file = output)
-    print(*map(lambda x : '\t'.join(map(str, x)), zip(upstream, downstream)), sep = '\n', file = output)
+    with buffered_writer(corpus) as h5_object:
+        write_feature(
+            h5_object,
+            group = group,
+            type = normalization,
+            name = f'{feature_name}_progressBetween',
+            values = progress_between,
+        )
 
-distance_sub = subparsers.add_parser('ingest-distance', help = 'Summarize distance to nearest feature upstream and downstream for some genomic elements.')
+        write_feature(
+            h5_object,
+            group = group,
+            type = normalization,
+            name = f'{feature_name}_interFeatureDistance',
+            values = interdistance,
+        )
+
+distance_sub = subparsers.add_parser('corpus-ingest-distance', help = 'Summarize distance to nearest feature upstream and downstream for some genomic elements.')
+distance_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
 distance_sub.add_argument('bed-file', type = file_exists, help = 'Bed file of genomic features. Only three columns are required, all other columns are ignored.')
-distance_sub.add_argument('--regions-file','-r', type = file_exists, required=True,)
 distance_sub.add_argument('--feature-name','-name', type = str, required=True,)
 distance_sub.add_argument('--group','-g', type = str, default='all', help = 'Group name for feature.')
 distance_sub.add_argument('--normalization','-norm', type = str, choices=['power','minmax','quantile','standardize'],
                             default='quantile', help = 'Normalization to apply to feature.')
-distance_sub.add_argument('--reverse','-rev', action = 'store_true', default=False, 
-                            help = 'Reverse the direction of the distance feature, for instance, if featurizing distance to anti-sense features only.')
-distance_sub.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
 distance_sub.set_defaults(func = process_distance_feature)
 
 
 def process_discrete(
         group='all',*,
         bed_file,
-        regions_file,
         feature_name,
-        output,
+        corpus,
         null='.',
         class_priority=None,
         column=4,
+        feature_type='categorical',
 ):
 
-    discrete_features = make_discrete_features(
-        genomic_features=bed_file,
-        regions_file=regions_file,
-        null=null,
-        class_priority=class_priority,
-        column=column,
-    )
+    with _get_regions_filename(corpus) as regions_file:
+        discrete_features = make_discrete_features(
+            genomic_features=bed_file,
+            regions_file=regions_file,
+            null=null,
+            class_priority=class_priority,
+            column=column,
+        )
+    
+    with buffered_writer(corpus) as h5_object:
+        write_feature(
+            h5_object,
+            name = feature_name,
+            group = group,
+            type = feature_type,
+            values = discrete_features,
+        )
 
-    print(f'#feature={feature_name}', file=output)
-    print('#type=categorical', file=output)
-    print(f'#group={group}', file = output)
-    print(*discrete_features, sep = '\n', file = output)
 
-
-discrete_sub = subparsers.add_parser('ingest-categorical', help = 'Summarize discrete genomic features for some genomic elements.')
+discrete_sub = subparsers.add_parser('corpus-ingest-categorical', help = 'Summarize discrete genomic features for some genomic elements.')
+discrete_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
 discrete_sub.add_argument('bed-file', type = file_exists, help = 'Bed file of genomic features. Only three columns are required, all other columns are ignored.')
-discrete_sub.add_argument('--regions-file','-r', type = file_exists, required=True,)
 discrete_sub.add_argument('--feature-name','-name', type = str, required=True,)
 discrete_sub.add_argument('--group','-g', type = str, default='all', help = 'Group name for feature.')
-discrete_sub.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
 discrete_sub.add_argument('--null','-null', type = str, default='None', help = 'Value to use for missing features.')
 discrete_sub.add_argument('--class-priority','-p', type = str, nargs = '+', default=None, help = 'Priority for resolving multiple classes for a single region.')
 discrete_sub.add_argument('--column','-c', type = posint, default=4, help = 'Column in bed file to use for feature.')
 discrete_sub.set_defaults(func = process_discrete)
 
 
-def write_dataset(
-        weight_col = None,
-        chr_prefix = '',
-        n_jobs=1,*,
-        fasta_file,
-        kmer_file,
-        regions_file,
-        vcf_files,
-        exposure_files,
-        correlates_file,
-        output,
-        corpus_name,
-        corpus_model
-        ):
+cardinality_sub = subparsers.add_parser('corpus-ingest-cardinality', help = 'Summarize discrete genomic features for some genomic elements.')
+cardinality_sub.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
+cardinality_sub.add_argument('bed-file', type = file_exists, help = 'Bed file of genomic features. The provided column must contain +/-/., all other columns are ignored.')
+cardinality_sub.add_argument('--feature-name','-name', type = str, required=True,)
+cardinality_sub.add_argument('--column','-c', type = posint, default=4, help = 'Column in bed file to use for feature.')
+cardinality_sub.set_defaults(func = partial(process_discrete, 
+                                         group = 'cardinality', 
+                                         null = '.', 
+                                         class_priority = ['+','-'],
+                                         feature_type = 'cardinality',
+                                        )
+                            )
 
-    shared_args = dict(
-        fasta_file = fasta_file, 
-        kmer_file = kmer_file,
-        regions_file = regions_file,
-        chr_prefix = chr_prefix,
-    )
+def ingest_sample(mutation_rate_bedgraph=None,
+                  sample_name=None,
+                  weight_col=None,
+                  chr_prefix='',
+                  *,corpus, sample_file, fasta_file
+                ):
+    
+    if sample_name is None:
+        sample_name = os.path.basename(sample_file)
 
-    logging.basicConfig(level=logging.INFO)
-    reader_logger.setLevel(logging.INFO)
+    if mutation_rate_bedgraph is None:
+        logger.warning('No mutation rate bedgraph provided, will not filter for clustered variants.')
 
-    if exposure_files is None:
-        exposure_files = []
+    SampleClass = peek_type(corpus)
 
-    assert len(exposure_files) in [0,1, len(vcf_files)],\
-        'User must provide zero, one, or the number of exposure files which matches the number of VCF files.'
-
-    dataset = None
-    if corpus_model.lower() == "motif":
-        dataset = MotifCorpusMaker.create_corpus(
-            **shared_args, 
+    with _get_regions_filename(corpus) as regions_file:
+        sample = SampleClass.featurize_mutations(
+            sample_file, 
+            regions_file,
+            fasta_file,
+            chr_prefix = chr_prefix,
             weight_col = weight_col,
-            motif_files = vcf_files,
-            exposure_files = exposure_files,
-            correlates_file = correlates_file,
-            corpus_name = corpus_name,
-            n_jobs = n_jobs,
+            mutation_rate_file = mutation_rate_bedgraph,
         )
-    else:
-        dataset = SBSCorpusMaker.create_corpus(
-            **shared_args, 
-            vcf_files = vcf_files,
-            weight_col = weight_col,
-            exposure_files = exposure_files,
-            correlates_file = correlates_file,
-            corpus_name = corpus_name,
-            n_jobs = n_jobs,
-        )
+    
+    sample.name = sample_name
 
-    save_corpus(dataset, output)
+    with buffered_writer(corpus) as h5_object:
+        write_sample(h5_object, sample, sample_name)
+
+ingest_sample_parser = subparsers.add_parser('corpus-ingest-sample', help = 'Ingest a sample into a corpus.')
+ingest_sample_parser.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
+ingest_sample_parser.add_argument('sample-file', type = file_exists, help = 'VCF file of mutations.')
+ingest_sample_parser.add_argument('--sample-name','-name', type = str, default=None, help = 'Name of sample, defaults to filename.')
+ingest_sample_parser.add_argument('--weight-col','-w', type = str, default=None, help = 'Column in INFO field to use as weight.')
+ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_exists, default=None, help = 'Bedgraph file of mutation rates.')
+ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
+ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
+ingest_sample_parser.set_defaults(func = ingest_sample)
 
 
-dataset_sub = subparsers.add_parser('corpus-make', 
-    help= 'Read VCF files and genomic correlates to compile a formatted dataset'
-          ' for locus modeling.',
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+def list_samples(corpus):
 
-dataset_sub.add_argument('--corpus-model', '-m', type = str, required=True, help='Which corpus model to use (e.g,, "motif", "sbs"), case insensitive.')
+    with h5.File(corpus, 'r') as f:
+        if not 'samples' in f or len(f['samples']) == 0:
+            print('No samples found in corpus.', file = sys.stderr)
+            os._exit(1)
 
-dataset_sub.add_argument('--corpus-name','-n', type = str, required = True, help = 'Name of corpus, must be unique if modeling with other corpuses.')
-dataset_sub.add_argument('--vcf-files', '-vcfs', nargs = '+', type = file_exists, required = True,
-    help = 'list of VCF files containing SBS mutations.')
-dataset_sub.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
-dataset_sub.add_argument('--regions-file','-r', type = file_exists, required = True,
-    help = 'Bed file of format with columns (chromosome, start, end) which defines the windows used to represent genomic loci in the model. '
-            'The provided regions may be discontinuous, but MUST be in sorted order (run "sort -k1,1 -k2,2 --check <file>").')
-dataset_sub.add_argument('--correlates-file', '-c', type = file_exists, required=True,
-    help = 'One TSV file, or list of TSV files of genomic correlates. If given as a list, the number of files must match the number of provided VCF files. '
-           'The first line must be column names which start with "#". '
-           'Each column must have a name, and each TSV file must have the same columns in the same order. '
-           'Each row in the file corresponds with the value of those correlates in the analagous region provided in the "regions" file. '
-           'Ensure that the correlates are listed in the same order as the regions, and that there are no missing values.'
-)
-dataset_sub.add_argument('--exposure-files','-e', type = file_exists, nargs = '+',
-    help = 'A one-column TSV file or list of. A header is optional. Again, a value must be provided for each region given in the "regions" file, and in the same order. '
-           'Exposures are positive scalars which the user calculates to reflect technical influences on the number of mutations one expects to '
-           'find within each region. The exposures may be proportional to number of reads falling within each region, or some other '
-           'metric to quantify sensitivity to call mutations.')
-dataset_sub.add_argument('--kmer-file','-kmers', type = file_exists,default=None,
-                         help = 'Pre-calculated k-nucleotide context file.')
-dataset_sub.add_argument('--output','-o', type = valid_path, required = True, help = 'Where to save compiled corpus.')
+        else:
+            for sample in f['samples'].keys():
+                print(f['samples'][sample].attrs['name'], file = sys.stdout)
 
-dataset_sub.add_argument('--weight-col','-w', type = str, default=None,
-    help = 'Name of INFO column which contains importance weights per mutation - if not provided all mutations are given a weight of 1. '
-           'An example of a useful weight is the tumor cell fraction or relative copy number of that mutation which may be related to local mutation rate due to changes in ploidy. '
-           'If the weight column were called INFO/VCN in the VCF, you must only provide --weight-col=VCN.'
-)
-dataset_sub.add_argument('--n-jobs','-j', type = posint, default = 1,
-    help = 'Number of parallel processes to use for reading VCF files.')
-dataset_sub.add_argument('--chr-prefix', default= '', help='Append the chromosome names in VCF files with this prefix. Useful if you are using UCSC reference materials.')
-dataset_sub.set_defaults(func = write_dataset)
+list_samples_parser = subparsers.add_parser('corpus-list-samples', help = 'List samples in a corpus.')
+list_samples_parser.add_argument('corpus', type = file_exists)
+list_samples_parser.set_defaults(func = list_samples)
+
+
+def remove_sample(corpus, sample_names):
+
+    with buffered_writer(corpus) as f:
+        for sample_name in sample_names:
+            try:
+                del f['samples'][sample_name]
+            except KeyError:
+                print(f'Sample {sample_name} not found in corpus.', file = sys.stderr)
+
+remove_sample_parser = subparsers.add_parser('corpus-rm-samples', help = 'Remove a sample from a corpus.')
+remove_sample_parser.add_argument('corpus', type = file_exists)
+remove_sample_parser.add_argument('sample-names', type = str, nargs='+')
+remove_sample_parser.set_defaults(func = remove_sample)
     
 
 def split_corpus(*,corpus, train_output, test_output, train_prop,
@@ -389,7 +598,7 @@ model_options.add_argument('--fix-signatures','-sigs', nargs='+', type = str, de
 model_options.add_argument('--num-epochs', '-e', type = posint, default=500,
     help = 'Maximum number of epochs to allow training during'
             ' successive halving/Hyperband. This should be set high enough such that the model converges to a solution.')
-model_options.add_argument('--model-type','-model', choices=['regression','gbt'], default='regression')
+model_options.add_argument('--model-type','-model', choices=['linear','gbt'], default='linear')
 model_options.add_argument('--locus-subsample','-sub', type = posfloat, default = 0.125,
     help = 'Whether to use locus subsampling to speed up training via stochastic variational inference.')
 model_options.add_argument('--batch-size','-batch', type = posint, default = 128,
@@ -584,19 +793,20 @@ trainer_sub.set_defaults(func = train_model)
 
 
 
-def score(*,model, corpuses):
+def score(subset_by_loci=False,*,model, corpuses):
 
     dataset = load_dataset(corpuses)
 
     model = load_model(model)
 
-    print(model.score(dataset))
+    print(model.score(dataset, subset_by_loci=subset_by_loci))
 
 
 score_parser = subparsers.add_parser('model-score', help='Score a model on a corpus.')
 score_parser.add_argument('model', type = file_exists)
 score_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
+score_parser.add_argument('--subset-by-loci', action = 'store_true', default=False)
 score_parser.set_defaults(func = score)
 
 
@@ -631,21 +841,6 @@ summary_plot_parser.add_argument('--output','-o', type = valid_path, required=Tr
 summary_plot_parser.set_defaults(func = summary_plot)
 
 
-def save_signatures(*, model, output):
-    
-    model = load_model(model)
-    
-    print('', *COSMIC_SORT_ORDER, sep = ',', file = output)
-    for i, component_name in enumerate(model.component_names):
-        print(component_name, *model.signature(i, return_error=False), sep = ',', file = output)
-
-signatures_parser = subparsers.add_parser('model-save-signatures', 
-                                          help = 'Save signatures to file.')
-signatures_parser.add_argument('model', type = file_exists)
-signatures_parser.add_argument('--output','-o', type =  argparse.FileType('w'), default=sys.stdout)
-signatures_parser.set_defaults(func = save_signatures)
-
-
 def list_corpuses(*,model):
     model = load_model(model)
     print(*model.corpus_states.keys(), sep = '\n', file = sys.stdout)
@@ -654,6 +849,16 @@ list_corpuses_parser = subparsers.add_parser('model-list-corpuses',
                                              help = 'List the names of corpuses used to train a model.')
 list_corpuses_parser.add_argument('model', type = file_exists)
 list_corpuses_parser.set_defaults(func = list_corpuses)
+
+
+def list_components(*,model):
+    model = load_model(model)
+    print(*model.component_names, sep = '\n', file = sys.stdout)
+
+list_components_parser = subparsers.add_parser('model-list-components',
+                                             help = 'List the names of corpuses used to train a model.')
+list_components_parser.add_argument('model', type = file_exists)
+list_components_parser.set_defaults(func = list_components)
 
 
 def get_mutation_rate_r2(*, model, corpuses):
@@ -682,7 +887,7 @@ def explain_wrapper(n_jobs=1,*,signature, model, corpuses, output):
     results = explain(signature,
             model = model,
             corpus = dataset,
-            n_jobs = n_jobs
+            n_jobs = n_jobs,
             )
     
     print(*results['feature_names'], sep=',', file = output)
@@ -721,7 +926,8 @@ corpusstate_cache_parser.set_defaults(func = _make_corpusstate_cache)
 
 
 def _write_posterior_annotated_vcf(
-    input_vcf, output,*,
+    input_vcf, output_name,*,
+    sample_class,
     model_state, 
     weight_col, 
     corpus_state,
@@ -731,10 +937,10 @@ def _write_posterior_annotated_vcf(
     component_names,
     ):
 
-    sample = SBSCorpusMaker.ingest_sample(
+    sample = sample_class.featurize_mutations(
                     input_vcf, 
-                    regions_file=regions_file,
-                    fasta_file=fasta_file,
+                    regions_file,
+                    fasta_file,
                     chr_prefix=chr_prefix,
                     weight_col=weight_col,
                 )
@@ -746,14 +952,15 @@ def _write_posterior_annotated_vcf(
                         component_names=component_names,
                         n_iters=5000,
                     )
-
-    transfer_annotations_to_vcf(
-        posterior_df,
-        vcf_file=input_vcf,
-        description='Log-probability under the posterior that the mutation was generated by this process.', 
-        output=output, 
-        chr_prefix=chr_prefix,
-    )
+    
+    with open(output_name, 'w') as output:
+        transfer_annotations_to_vcf(
+            posterior_df,
+            vcf_file=input_vcf,
+            description={}, 
+            output=output, 
+            chr_prefix=chr_prefix,
+        )
 
 
 def assign_components_wrapper(*,
@@ -763,42 +970,40 @@ def assign_components_wrapper(*,
         output_prefix, 
         exposure_file=None, 
         weight_col=None,
+        regions_file,
+        fasta_file,
         chr_prefix = '',
         n_jobs=1,
     ):
 
+    SampleClass = peek_type(corpus)
     corpus_state = load_corpusstate_cache(model, corpus)
     
     model = load_model(model)
     corpus = stream_corpus(corpus)
 
-    try:
-        corpus.metadata['regions_file']
-    except KeyError as err:
-        raise ValueError('Corpus must have a "regions_file" metadata attribute.\n'
-                         'This one doesn\'t, which means it must be a partition of some corpus, or a simluted corpus.\n'
-                         'This function must use the originally-created corpus.') from err
+    
+    with _get_regions_filename(corpus) as regions_file:
 
-    annotation_fn = partial(
-        _write_posterior_annotated_vcf,
-        model_state=model.model_state, 
-        weight_col=weight_col, 
-        corpus_state=corpus_state,
-        regions_file=corpus.metadata['regions_file'],
-        fasta_file=corpus.metadata['fasta_file'],
-        chr_prefix=chr_prefix,
-        component_names=model.component_names,
-    )
-
-    del corpus
-
-    Parallel(
-            n_jobs = n_jobs, 
-            verbose = 10,
-        )(
-            delayed(annotation_fn)(vcf, output_prefix + os.path.basename(vcf))
-            for vcf in vcf_files
+        annotation_fn = partial(
+            _write_posterior_annotated_vcf,
+            sample_class=SampleClass,
+            model_state=model.model_state, 
+            weight_col=weight_col, 
+            corpus_state=corpus_state,
+            regions_file=regions_file, 
+            fasta_file= fasta_file,
+            chr_prefix=chr_prefix,
+            component_names=model.component_names,
         )
+
+        Parallel(
+                n_jobs = n_jobs, 
+                verbose = 10,
+            )(
+                delayed(annotation_fn)(vcf, output_prefix + os.path.basename(vcf))
+                for vcf in vcf_files
+            )
 
     
 assign_components_parser = subparsers.add_parser('model-annotate-mutations',
@@ -811,6 +1016,8 @@ assign_components_parser.add_argument('--exposure-file','-e', type = file_exists
 assign_components_parser.add_argument('--chr-prefix', type = str, default = '')
 assign_components_parser.add_argument('--weight-col','-w', type = str, default=None)
 assign_components_parser.add_argument('--n-jobs','-j',type=posint, default=1)
+assign_components_parser.add_argument('--regions-file','-r', type = file_exists, required=True)
+assign_components_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True)
 assign_components_parser.set_defaults(func = assign_components_wrapper)
 
 

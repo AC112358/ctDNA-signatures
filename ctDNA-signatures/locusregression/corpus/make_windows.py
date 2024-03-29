@@ -54,7 +54,8 @@ def _make_fixed_size_windows(*,
                             genome_file, 
                             window_size,
                             blacklist_file=None,
-                            output = sys.stdout):
+                            output = sys.stdout
+                        ):
     
     process_kw = dict(
         universal_newlines=True,
@@ -131,7 +132,7 @@ def _get_endpoints(allowed_chroms, *bedfiles):
     )
 
 
-def _endpoints_to_regions(endpoints, min_windowsize = 5):
+def _endpoints_to_regions(endpoints, min_windowsize = 3):
 
     active_features = Counter()
     feature_combination_ids = dict()

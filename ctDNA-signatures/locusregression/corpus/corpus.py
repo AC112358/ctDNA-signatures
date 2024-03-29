@@ -5,7 +5,7 @@ import h5py as h5
 import logging
 from .sample import SampleLoader, InMemorySamples
 from .sbs.observation_config import SBSSample
-from .motif.observation_config import MotifSample
+from pandas import DataFrame
 from tqdm import trange
 logger = logging.getLogger('Corpus')
 
@@ -13,24 +13,33 @@ logger = logging.getLogger('Corpus')
 class CorpusMixin(ABC):
 
     def __init__(self,
-        metadata = {},*,
+        metadata = {},
+        exposures=None,*,
         type,
         name,
         samples,
         features,
         context_frequencies,
-        shared_exposures,
+        regions,
     ):
-        self.type=type
+        self.type = type
         self.name = name
         self.samples = samples
         self.features = features
         self.context_frequencies = context_frequencies
-        self._shared_exposures = shared_exposures
+        self._shared_exposures = True
         self.metadata = metadata
+        self.regions=regions
+        
+        if exposures is None:
+            self._exposures = np.ones((1, self.locus_dim))
+        else:
+            assert exposures.shape == (1, self.locus_dim,)
+            self._exposures = exposures
 
-        if self._shared_exposures:
-            self._exposures = samples[0].exposures
+        assert context_frequencies.shape == \
+            (self.cardinalities_dim, self.context_dim, self.locus_dim)
+        
 
     @abstractmethod
     def observation_class(self):
@@ -44,6 +53,8 @@ class CorpusMixin(ABC):
             'attribute_dim' : self.attribute_dim,
             'locus_dim' : self.locus_dim,
             'feature_dim' : self.feature_dim,
+            'cardinality_features_dim' : self.cardinality_features_dim,
+            'cardinalities_dim' : self.cardinalities_dim,
         }
     
     @property
@@ -101,8 +112,6 @@ class Corpus(CorpusMixin):
     def _get_observation_class(cls, classname):
         if classname.lower() == 'sbs':
             return SBSSample
-        elif classname.lower() == 'motif':
-            return MotifSample
         else:
             raise ValueError(f'Unknown corpus type {classname}')
 
@@ -128,8 +137,15 @@ class Corpus(CorpusMixin):
     
     @property
     def feature_dim(self):
-        return len(self.features)
-
+        return len([f for f in self.features.values() if not f['type'] == 'cardinality'])
+    
+    @property
+    def cardinality_features_dim(self):
+        return len([f for f in self.features.values() if f['type'] == 'cardinality'])
+    
+    @property
+    def cardinalities_dim(self):
+        return self.observation_class.N_CARDINALITY
 
     def __len__(self):
         return len(self.samples)
@@ -167,8 +183,9 @@ class Corpus(CorpusMixin):
             samples = self.samples.subset(subset_idx),
             features=self.features,
             context_frequencies = self.context_frequencies,
-            shared_exposures = self.shared_exposures,
+            exposures = self.exposures,
             name = self.name,
+            regions=self.regions,
         )
 
 
@@ -182,6 +199,7 @@ class Corpus(CorpusMixin):
         #total_mutations = 0
         new_samples = []
         for sample in self.samples:
+                        
             mask = bool_array[sample.locus]
 
             new_sample = self.observation_class(**{
@@ -189,10 +207,10 @@ class Corpus(CorpusMixin):
                 'mutation' : sample.mutation[mask],
                 'context' : sample.context[mask],
                 'weight' : sample.weight[mask],
+                'cardinality' : sample.cardinality[mask],
                 'locus' : np.array([subsample_lookup[locus] for locus in sample.locus[mask]]).astype(int),
                 'chrom' : sample.chrom[mask],
-                'pos' : sample.pos[mask],
-                'exposures' : sample.exposures[:,loci],   
+                'pos' : sample.pos[mask], 
                 'name' : sample.name,
             })
             new_samples.append(new_sample)
@@ -208,9 +226,10 @@ class Corpus(CorpusMixin):
                 }
                 for feature_name, v in self.features.items()
             },
-            context_frequencies = self.context_frequencies[:,loci],
-            shared_exposures = self.shared_exposures,
+            context_frequencies = self.context_frequencies[:,:,loci],
             name = self.name,
+            exposures = self.exposures[:, loci],
+            regions=[self.regions[l] for l in loci]
         )
     
 
@@ -222,13 +241,32 @@ class Corpus(CorpusMixin):
     def get_empirical_mutation_rate(self, use_weight=True):
 
         # returns the ln mutation rate for each locus in the first sample
-        mutation_rate = self.samples[0].get_empirical_mutation_rate(use_weight = use_weight).toarray()
+        mutation_rate = self.samples[0].get_empirical_mutation_rate(self.locus_dim, use_weight = use_weight)
 
         # loop through the rest of the samples and add the mutation rate using logsumexp
         for i in trange(1, len(self), desc = 'Piling up mutations', ncols=100):
-            mutation_rate = mutation_rate + self.samples[i].get_empirical_mutation_rate(use_weight = use_weight).toarray()
+            mutation_rate = mutation_rate + self.samples[i].get_empirical_mutation_rate(self.locus_dim, use_weight = use_weight)
+        
+        return mutation_rate
+    
 
-        return mutation_rate #.tocsr()
+    def get_features_df(self):
+        return DataFrame(
+            {
+                feature_name : feature['values']
+                for feature_name, feature in self.features.items()
+                if not feature['type'] == 'cardinality'
+            }
+        )
+    
+    def get_cardinality_features_df(self):
+        return DataFrame(
+            {
+                feature_name : feature['values']
+                for feature_name, feature in self.features.items()
+                if feature['type'] == 'cardinality'
+            }
+        )
 
 
 
@@ -267,6 +305,14 @@ class MetaCorpus(CorpusMixin):
     @property
     def feature_dim(self):
         return self.corpuses[0].feature_dim
+    
+    @property
+    def cardinality_features_dim(self):
+        return self.corpuses[0].strand_dim
+    
+    @property
+    def cardinalities_dim(self):
+        return self.corpuses[0].cardinality_dim
     
     @property
     def locus_dim(self):
@@ -346,114 +392,6 @@ class MetaCorpus(CorpusMixin):
     def feature_names(self):
         return self.corpuses[0].feature_names
 
-
-
-def save_corpus(corpus, filename):
-
-    with h5.File(filename, 'w') as f:
-        
-        data_group = f.create_group('data')
-        data_group.attrs['shared_exposures'] = corpus.shared_exposures
-        data_group.attrs['name'] = corpus.name
-        data_group.attrs['type'] = corpus.type
-        
-        metadata_group = f.create_group('metadata')
-        for key, val in corpus.metadata.items():
-            metadata_group.attrs[key] = val
-
-        data_group.create_dataset('context_frequencies', data = corpus.context_frequencies)
-        features_group = data_group.create_group('features')
-
-        for feature_name, feature in corpus.features.items():
-            
-            logger.debug(f'Saving correlate: {feature_name} ...')
-            
-            feature_group = features_group.create_group(feature_name)
-            feature_group.attrs['type'] = feature['type']
-            feature_group.attrs['group'] = feature['group']
-
-            if np.issubdtype(feature['values'].dtype, np.str_):
-                feature['values'] = feature['values'].astype('S')
-            
-            feature_group.create_dataset('values', data = feature['values'])
-
-        samples_group = f.create_group('samples')
-
-        for i, sample in enumerate(corpus.samples):
-            sample.create_h5_dataset(samples_group, str(i))
-
-
-def _peek_type(filename):
-    
-    with h5.File(filename, 'r') as f:
-        return Corpus._get_observation_class(f['data'].attrs['type'])
-
-
-def _read_features(data):
-
-    features = {}
-    feature_groups = data['data/features']
-    
-    for feature_name in feature_groups.keys():
-        feature_group = feature_groups[feature_name]
-        features[feature_name] = {
-            'type' : feature_group.attrs['type'],
-            'group' : feature_group.attrs['group'],
-            'values' : feature_group['values'][...],
-        }
-
-    return features
-
-
-def _load_corpus(filename, sample_obj):
-
-    with h5.File(filename, 'r') as f:
-
-        is_shared = f['data'].attrs['shared_exposures']
-
-        if 'metadata' in f.keys():
-            metadata = {
-                key : val for key, val in f['metadata'].attrs.items()
-            }
-        else:
-            metadata = {}
-
-
-        return Corpus(
-            type = f['data'].attrs['type'],
-            context_frequencies = f['data/context_frequencies'][...],
-            features = _read_features(f),
-            samples = sample_obj,
-            shared_exposures=is_shared,
-            name = f['data'].attrs['name'],
-            metadata=metadata
-        )
-
-
-
-def load_corpus(filename):
-
-    sample_type = _peek_type(filename)
-
-    with h5.File(filename, 'r') as f:
-        samples = InMemorySamples([
-            sample_type.read_h5_dataset(f, f'samples/{i}')
-            for i in range(len(f['samples'].keys()))
-        ])
-
-    return _load_corpus(
-        filename,
-        samples,
-    )
-    
-
-def stream_corpus(filename):
-
-    return _load_corpus(
-        filename,
-        SampleLoader(filename, observation_class=_peek_type(filename)
-)
-    )
 
 
 def train_test_split(corpus, seed = 0, train_size = 0.7,

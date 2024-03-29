@@ -1,9 +1,9 @@
-#import shap
 import logging
 from numpy.random import RandomState
 from numpy import vstack, squeeze
 from joblib import Parallel, delayed
-
+import shap
+import pandas as pd
 logger = logging.getLogger(__name__)
 
 def explain(
@@ -30,22 +30,26 @@ def explain(
     
     tree_model = model.model_state.rate_models[component]
 
-    corpus_state = model.corpus_states[corpus.name].clone_corpusstate(corpus)
+    corpus_states = {
+        name : state.clone_corpusstate(corpus.get_corpus(name))
+        for name, state in model.corpus_states.items()
+        if name in corpus.corpus_names
+    }
     
     X_tild = model.model_state.feature_transformer\
-        .transform({corpus.name : corpus_state})
+        .transform(corpus_states)
 
     background_idx = RandomState(0)\
                         .choice(
                             len(X_tild), 
-                            size = 500, 
+                            size = 1000, 
                             replace = False
                         )
 
     explainer = shap.TreeExplainer(
         tree_model,
         X_tild[background_idx],
-        check_additivity=False
+        check_additivity=False,
     )
 
     num_chunks = corpus.locus_dim // chunk_size + 1
@@ -57,8 +61,11 @@ def explain(
         )
     )
 
-    return {
-        'shap_values' : shap_values,
-        'feature_names' : model.model_state.feature_transformer.feature_names_out,
-        'component_name' : model.component_names[component],
-    }
+    feature_names = model.model_state.feature_transformer.feature_names_out
+
+    return (
+        shap_values,
+        X_tild, 
+        feature_names,
+        model.model_state.feature_transformer.assemble_matrix(corpus_states)[0][feature_names].values,
+    )

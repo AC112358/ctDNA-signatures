@@ -4,6 +4,11 @@ from numpy import array, log
 from functools import partial
 from sklearn.preprocessing import OrdinalEncoder
 
+
+import numpy as np
+
+
+
 def _get_model_fn(*,
                   design_matrix,
                   features,
@@ -11,7 +16,7 @@ def _get_model_fn(*,
                   interaction_groups,
                   tree_learning_rate = 0.1,
                   max_leaf_nodes = 31,
-                  min_samples_leaf = 20,
+                  min_samples_leaf = 30,
                   max_features = 1.,
                   max_depth = 5,
                   l2_regularization = 0.0,
@@ -50,7 +55,7 @@ class GBTModelState(ModelState):
                  tree_learning_rate = 0.1, 
                  max_trees_per_iter = 100,
                  max_leaf_nodes = 31,
-                 min_samples_leaf = 20,
+                 min_samples_leaf = 30,
                  max_features = 1.,
                  max_depth = 5,
                  l2_regularization = 0.0,
@@ -111,27 +116,29 @@ class GBTModelState(ModelState):
 
 class GBTCorpusState(CorpusState):
     
-    def update_mutation_rate(self, model_state, from_scratch = False):
+    def update(self, model_state, from_scratch = False):
 
         X = model_state.feature_transformer.transform(
                                     {self.name : self}
                                 )
 
         if not from_scratch:
-            self._logmu = array([
+            self._theta = array([
                 model_state.rate_models[k]._raw_predict_from(
                     X, 
-                    self._logmu[k].reshape((-1,1)), 
+                    self.theta_[k].reshape((-1,1)), 
                     from_iteration = model_state.predict_from[k]
                 ).ravel()
                 for k in range(self.n_components)
             ])
 
         else:
-            self._logmu = array([
+            self._theta = array([
                 log(model_state.rate_models[k].predict(X).ravel())
                 for k in range(self.n_components)
             ])
 
-        if self.corpus.shared_exposures:
-            self._log_denom = self._calc_log_denom(model_state, self.corpus.exposures)
+        self._update_stored_params(model_state)
+
+        return self
+    

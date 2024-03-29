@@ -1,7 +1,7 @@
-
 from ._dirichlet_update import log_dirichlet_expectation, dirichlet_bound
 import locusregression.model._sstats as _sstats
 from ._model_state import ModelState, CorpusState
+from ..explanation.explanation import explain
 from pandas import DataFrame
 import numpy as np
 import time
@@ -10,6 +10,8 @@ import matplotlib.pyplot as plt
 import pickle
 import logging
 from scipy.special import xlogy
+from shap import Explanation
+from seaborn import stripplot, violinplot
 logger = logging.getLogger(' LocusRegressor')
 
 
@@ -26,25 +28,24 @@ def _get_observation_likelihood(*,model_state, sample, corpus_state):
     Flattened phi is the probability of a mutation and locus for each signature given the current modelstate.
     Shape: N_sigs x N_mutations
     '''
-    rho = model_state.omega/model_state.omega.sum(axis = -1, keepdims = True)
-    print("# contexts:", sample.context.shape)
-    print("# loci:", sample.locus.shape)
-    print("context freqs:", corpus_state.context_frequencies[sample.context, sample.locus])
-    print("\t shape:", corpus_state.context_frequencies[sample.context, sample.locus].shape)
-    print("\t min value:", min(corpus_state.context_frequencies[sample.context, sample.locus]))
-    print("\t # zeros:", sum(corpus_state.context_frequencies[sample.context, sample.locus]==0))
-    print("\t total # contexts:", sum(corpus_state.context_frequencies[sample.context, sample.locus]))
-    print("\t # zeros in 1st locus:", sum(corpus_state.context_frequencies[sample.context, sample.locus[0]]==0))
-    print("\t # contexts in 1st locus:",  sum(corpus_state.context_frequencies[sample.context, sample.locus[0]]))
+
+    '''
+    return (
+                self.cardinality_effects_[k] + \
+                + np.log(self.context_frequencies) \
+                + np.log(model_state.lambda_[k][None,:,None])
+            )
+    '''
     
     flattend_phi = (
-            np.log(rho) + \
-            np.log(model_state.delta)[:,:,None]
-        )[:, sample.context, sample.mutation]\
-        + np.log(sample.exposures[:, sample.locus]) \
-        + np.log(corpus_state.context_frequencies[sample.context, sample.locus]) \
-        + corpus_state.logmu[:, sample.locus] \
-        - corpus_state.get_log_denom(sample.exposures)\
+        np.log(model_state.rho_)[:, sample.context, sample.mutation] \
+        + np.squeeze(corpus_state.cardinality_effects_, axis=2)[:, sample.cardinality, sample.locus] \
+        + np.log(corpus_state.context_frequencies[sample.cardinality, sample.context, sample.locus]) \
+        + np.log(model_state.lambda_[:, sample.context]) \
+        + np.log(corpus_state.exposures[:, sample.locus]) \
+        + corpus_state.theta_[:, sample.locus] \
+        - corpus_state.log_denom_
+    )
     
     exp_phi = np.nan_to_num(np.exp(flattend_phi), nan=0)
 
@@ -279,9 +280,10 @@ class LocusRegressor:
             for corp in corpus.corpuses
         }
 
+        sample_num = 0
         gammas = []
         for gamma_g, sample in zip(gamma, corpus):
-
+            
             sample_sstats = self._sample_inference(
                         sample = sample,
                         gamma0 = gamma_g, 
@@ -291,6 +293,8 @@ class LocusRegressor:
                         model_state = model_state,
                         corpus_state = corpus_states[sample.corpus_name]
                     )
+            
+            sample_num += 1
 
             sstat_collections[sample.corpus_name] += sample_sstats
             gammas.append(sample_sstats.gamma)
@@ -298,9 +302,9 @@ class LocusRegressor:
         return self.SSTATS.MetaSstats(sstat_collections), np.vstack(gammas)
         
 
-    def _update_mutation_rates(self):
+    def _update_corpus_states(self):
         for corpusstate in self.corpus_states.values():
-            corpusstate.update_mutation_rate(self.model_state)
+            corpusstate.update(self.model_state)
 
 
     def _init_doc_variables(self, n_samples, is_bound = False):
@@ -342,7 +346,7 @@ class LocusRegressor:
 
         
         fix_strs = list(self.fix_signatures) if not self.fix_signatures is None else []
-        self.component_names = fix_strs + ['Component ' + str(i) for i in range(self.n_components - len(fix_strs))]
+        self.component_names = fix_strs + ['Component_' + str(i) for i in range(self.n_components - len(fix_strs))]
 
         self.training_bounds_ = []; self.testing_bounds_ = []
         self.elapsed_times = []
@@ -376,7 +380,7 @@ class LocusRegressor:
         self._gamma = self._init_doc_variables(self.n_samples)
 
         for state in self.corpus_states.values():
-            state.update_log_denom(self.model_state, state.exposures)
+            state._update_stored_params(self.model_state)
 
 
     def _subsample_corpus(self,*,corpus, batch_svi, locus_svi, n_subsample_loci):
@@ -425,6 +429,7 @@ class LocusRegressor:
 
         if reinit:
             logger.info('Initializing model ...')
+            logger.info('Fitting model with corpuses: ' + ', '.join(corpus.corpus_names))
             self._init_model(corpus)
         
         n_subsample_loci = int(self.n_loci * self.locus_subsample)
@@ -434,7 +439,7 @@ class LocusRegressor:
 
         
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            #warnings.simplefilter("ignore")
 
             logger.info('Training model ...')
 
@@ -473,7 +478,7 @@ class LocusRegressor:
                         for corpus_state in self.corpus_states.values():
                             corpus_state.update_alpha(sstats, learning_rate_fn(epoch))
 
-                self._update_mutation_rates()
+                    self._update_corpus_states()
 
                 elapsed_time = time.time() - start_time
                 self.elapsed_times.append(elapsed_time)
@@ -483,6 +488,13 @@ class LocusRegressor:
                 if (not self.eval_every is None) and epoch % self.eval_every == 0:
                     
                     with TimerContext('Calculating bound'):
+
+                        '''_, gamma = self._inference(
+                                corpus = corpus,
+                                model_state = self.model_state,
+                                corpus_states = self.corpus_states,
+                                gamma = self._init_doc_variables(len(corpus))
+                            )'''
                         
                         elbo = self._bound(
                                 corpus = corpus,
@@ -542,6 +554,7 @@ class LocusRegressor:
                 subset_by_loci = subset_by_loci
             ):
                 pass
+            
         except KeyboardInterrupt:
             logger.info('Training interrupted by user.')
             pass
@@ -564,7 +577,7 @@ class LocusRegressor:
         }
         
         for clone in corpus_state_clones.values():
-            clone.update_mutation_rate(self.model_state, from_scratch = True)
+            clone.update(self.model_state, from_scratch = True)
             clone.as_dummy()
 
         return corpus_state_clones
@@ -676,20 +689,10 @@ class LocusRegressor:
 
         _genome_context_frequencies = np.sum(
             corpus.context_frequencies,
-            -1, keepdims= True
+            (0,-1),
         )
 
         self._genome_context_frequencies = _genome_context_frequencies/_genome_context_frequencies.sum()
-
-
-    def get_log_nucleotide_effect(self, corpus):
-
-        try:
-            self.corpus_states[corpus.name]
-        except KeyError:
-            raise ValueError(f'Corpus {corpus.name} not found in model.')
-        
-        return np.log( self.model_state.delta @ corpus.context_frequencies )
 
 
     def get_log_component_mutation_rate(self, corpus, use_context=True):
@@ -711,7 +714,7 @@ class LocusRegressor:
             raise ValueError(f'Corpus {corpus.name} not found in model.')
         
         new_state = corpus_state.clone_corpusstate(corpus)
-        new_state.update_mutation_rate(self.model_state, from_scratch = True)
+        new_state.update(self.model_state, from_scratch = True)
 
         return new_state.get_log_component_effect_rate(
                     self.model_state, new_state.exposures, use_context=use_context,
@@ -742,14 +745,19 @@ class LocusRegressor:
         if not self.is_trained:
             logger.warn('This model was not trained to completion, results may be innaccurate')
 
-        corpus_state = self.corpus_states[corpus.name]
-        gamma = corpus_state.alpha/corpus_state.alpha.sum() # use expectation of the prior over components
+        try:
+            corpus_state = self.corpus_states[corpus.name]
+        except KeyError:
+            raise ValueError(f'Corpus {corpus.name} not found in model.')
         
-        psi_tensor = np.exp(self.get_log_component_mutation_rate(corpus)) # n_components x n_contexts x n_loci
-        
-        marginalized = np.squeeze(np.tensordot(gamma, psi_tensor, axes=([0], [0])))
+        new_state = corpus_state.clone_corpusstate(corpus)
+        new_state.update(self.model_state, from_scratch = True)
 
-        return np.log(marginalized)
+        gamma = new_state.alpha/new_state.alpha.sum()
+
+        return new_state._get_log_marginal_effect_rate(
+            gamma, self.model_state, new_state.exposures,
+        )
     
     
     def get_mutation_rate_r2(self, corpus):
@@ -806,7 +814,8 @@ class LocusRegressor:
     def plot_signature(self, component, ax = None, 
                        figsize = (5.5,3), 
                        normalization = 'global', 
-                       fontsize=7):
+                       fontsize=7,
+                       show_strand=True):
         '''
         Plot signature.
         '''
@@ -814,18 +823,52 @@ class LocusRegressor:
         component = self._get_signature_idx(component)
 
         self.observation_class.plot_factorized(
-            context_dist = self.model_state.delta[component]/self._genome_context_frequencies.ravel(),
-            mutation_dist = self.model_state.omega[component],
+            context_dist = self.model_state.lambda_[component]*self._genome_context_frequencies.ravel(),
+            mutation_dist = self.model_state.rho_[component],
             attribute_dist = None,
             ax = ax,
             figsize = figsize,
-            fontsize = fontsize
+            fontsize = fontsize,
+            show_strand=show_strand,
         )
+
+        return ax
+    
+
+    def plot_cardinality_bias(self, component, ax = None, figsize = (1,2), fontsize=7):
+        
+        component = self._get_signature_idx(component)
+
+        if ax is None:
+            fig, ax = plt.subplots(1,1, figsize = figsize)
+
+        xticks = self.model_state.strand_transformer.feature_names_
+        bar = np.log2(self.model_state.tau_[component])
+        ax.bar(
+            xticks,
+            bar,
+            color = ['lightgrey' if b > 0 else 'darkred' for b in bar],
+            edgecolor = 'black',
+            linewidth = 0.1,
+            width = 0.5,
+        )
+
+        ax.set_ylabel('log2 Bias', fontsize=fontsize)
+        ax.tick_params(axis='x', rotation=90, labelsize=fontsize)
+        
+        bound = round(max(0.25, np.abs(bar).max() + 0.25) * 4) / 4
+        ax.set(ylim = (-bound,bound))
+        ax.set_yticks([-bound,0,bound])
+        ax.set_yticklabels([-bound,0,bound], fontsize = fontsize)
+        ax.axhline(0, color='black', linewidth=0.5)
+
+        for spine in ax.spines.values():
+            spine.set_visible(False)
 
         return ax
 
 
-    def plot_summary(self):
+    def plot_summary(self,*components):
         """
         Plot the summary of the model.
 
@@ -833,16 +876,44 @@ class LocusRegressor:
             ax (matplotlib.axes.Axes): The axes object containing the plot.
         """
 
-        fig, ax = plt.subplots(self.n_components, 1, 
-                               figsize=(5.5, 1.25*self.n_components), 
-                               sharex=True
+        if len(components) == 0:
+            components = self.component_names
+
+        n_card_features = len(self.model_state.strand_transformer.feature_names_)
+        n_locus_features = len(self.model_state.feature_transformer.feature_names_out)
+
+        fig, ax = plt.subplots(len(components), 3, 
+                               figsize=(5.5 + 0.5*n_card_features + 0.35*n_locus_features, 1.75*len(components)), 
+                               sharex='col',
+                               gridspec_kw={
+                                   'width_ratios': [5.5, 0.5*n_card_features, 0.35*n_locus_features],
+                                   'hspace': 0.5,
+                                   'wspace': 0.25,
+                                   }
                                )
+        
+        ax = np.atleast_2d(ax)
 
-        for i in range(self.n_components):
-            self.plot_signature(i, ax=ax[i])
-            ax[i].set_title('')
-            ax[i].set_ylabel(self.component_names[i], fontsize=7)
+        for i, comp in enumerate(components):
+            self.plot_signature(comp, ax=ax[i,0])
+            ax[i,0].set_title('')
+            ax[i,0].set_ylabel(comp, fontsize=7)
 
+            if self.model_state.fit_cardinality_:
+                self.plot_cardinality_bias(comp, ax=ax[i,1], fontsize=7)
+
+            #try:
+            self.explanation_shap_values_[comp]
+            self.plot_explanation(comp, ax=ax[i,2])
+            #except AttributeError:
+            #    logger.warn(f'No explanations have been calculated for {comp}.')
+            #    ax[i, 2].axis('off')
+            
+            if i < len(components) - 1:
+                ax[i,1].tick_params(axis='x', bottom=False)
+                ax[i,2].tick_params(axis='x', bottom=False)
+
+        plt.tight_layout()
         return ax
     
 
@@ -869,9 +940,142 @@ class LocusRegressor:
         )
 
         return np.array([
-            self.model_state._convert_beta_sstats_to_array(k, sstats, corpus.locus_dim).ravel()
+            sstats[corpus.name].theta_sstats(k, corpus.locus_dim)
             for k in range(self.n_components)
         ])
+    
+
+    def calc_locus_explanations(self, corpus, subsample=10000, n_jobs=1):
+
+        if not self.is_trained:
+            logger.warn('This model was not trained to completion, results may be innaccurate')
+
+        if not subsample is None:
+
+            logger.info(
+                'Subsampling loci for explanation ...'
+            )
+
+            subsample = min(subsample, corpus.locus_dim)
+
+            subsample_idx = self.random_state.choice(corpus.locus_dim, size = subsample, replace = False)
+            corpus = corpus.subset_loci(subsample_idx)
+
+        self.explanation_shap_values_ = {}
+        self.explanation_interaction_values_ = {}
+        self.explanation_features_ = None
+        self.explanation_display_features_ = None
+
+        for component in self.component_names:
+            
+            logger.info(
+                'Calculating SHAP values for component ' + component + ' ...'
+            )
+            
+            self.explanation_shap_values_[component], \
+                self.explanation_features_, \
+                self.explanation_feature_names_, \
+                self.explanation_display_features_ = \
+                    explain(
+                        component,
+                        model = self,
+                        corpus = corpus,
+                        n_jobs = n_jobs,
+                        chunk_size=10000, #max(10000, subsample + 1)
+                    )
+            
+    
+    def explanation(self, component):
+        """
+        Get the explanation for a given component.
+
+        Parameters:
+        component (str): The component for which to get the explanation.
+
+        Returns:
+        tuple: A tuple containing the SHAP values, features, and feature names.
+        """
+
+        component = self.component_names[self._get_signature_idx(component)]
+
+        try:
+            self.explanation_shap_values_[component]
+        except AttributeError:
+            raise ValueError('No explanations have been calculated for this model.')
+
+        return Explanation(
+            self.explanation_shap_values_[component],
+            data = self.explanation_features_,
+            feature_names = self.explanation_feature_names_,
+            display_data = self.explanation_display_features_,
+        )
+    
+
+    def plot_explanation(self, component, ax=None, height=2, fontsize=7):
+        
+        expl = self.explanation(component)
+
+        expl_df = DataFrame(expl.values, columns=expl.feature_names)\
+            .melt(ignore_index=False, var_name='feature', value_name='shap_value')\
+            .reset_index()\
+            .merge(
+                DataFrame(expl.data, columns=expl.feature_names)\
+                .melt(ignore_index=False, var_name='feature', value_name='value')\
+                .reset_index(),
+                on=['index', 'feature']
+            )
+        
+        bound_max, bound_min = expl_df.shap_value.max(), expl_df.shap_value.min()
+        
+        if ax is None:
+            _, ax = plt.subplots(1,1,figsize=(len(expl.feature_names)*0.35,height))
+
+        violinplot(
+            data = expl_df,
+            x = 'feature',
+            y = 'shap_value',
+            color = 'lightgrey',
+            alpha =0.,
+            linewidth=0.5,
+            ax = ax,
+            legend=False,
+            zorder=1,
+        )
+
+        stripplot(
+            data = expl_df,
+            x = 'feature',
+            y = 'shap_value',
+            hue = 'value',
+            s = 0.5,
+            alpha = 0.5,
+            palette='coolwarm',
+            ax = ax,
+            legend=False,
+            zorder=0,
+        )
+        ax.axhline(0, color='black', linewidth=0.5, alpha =0.2)
+        ax.tick_params(axis='x', rotation=90, labelsize=fontsize)
+        ax.tick_params(axis='y', labelsize=fontsize)
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.set_ylabel('SHAP value', fontsize=fontsize)
+        ax.set_xlabel('Feature', fontsize=fontsize)
+
+        bound_max = max(np.ceil(bound_max * 4) / 4, 1.5)
+        bound_min = min(np.floor(bound_min * 4) / 4, -1.5)
+        ax.set_ylim(bound_min, bound_max)
+        ax.set_yticks([bound_min, 0, bound_max])
+
+        return ax
+
+         
+        
+        
+
 
 
    

@@ -11,6 +11,7 @@ def _get_nfs_storage(study_name):
                     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                     f'.journal.{study_name}.db'
                 )
+
     storage = optuna.storages.JournalStorage(
         optuna.storages.JournalFileStorage(journal)
     )
@@ -111,15 +112,7 @@ def load_study(study_name, storage = None, with_corpus = True):
             dataset = MetaCorpus(*[
                 stream_corpus(corpus) for corpus in corpuses
             ])
-    print(len(corpuses))
-    print(corpuses[0])
-    print(type(dataset))
-    print(dataset.shape)
-    print(dataset.features)
-    print(dataset.context_frequencies)
-    print(len(dataset.context_frequencies))
-    print(dataset.type)
-    print("done printing dataset info")
+
     return study, dataset, attrs
 
 

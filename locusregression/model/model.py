@@ -845,7 +845,7 @@ class LocusRegressor:
 
         xticks = self.model_state.strand_transformer.feature_names_
         
-        bar=self.model_state.tau_[component]**2 - 1
+        bar=-(self.model_state.tau_[component]**2 - 1)
         ax.bar(
             xticks,
             bar,

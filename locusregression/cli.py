@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.INFO)
 logger.setLevel(logging.INFO)
 import pickle
 import logging
+from pandas import concat
 import warnings
 from matplotlib.pyplot import savefig
-from .explanation.explanation import explain
 from functools import partial
 from joblib import Parallel, delayed
 import joblib
@@ -565,6 +565,32 @@ empirical_mutrate_parser.add_argument('corpus', type = file_exists)
 empirical_mutrate_parser.add_argument('--output', '-o', type = argparse.FileType('w'), 
                                         default = sys.stdout)
 empirical_mutrate_parser.set_defaults(func = empirical_mutation_rate)
+
+
+def corpus_write_features_bedgraph(*,corpus,output):
+
+    with _get_regions_filename(corpus) as regions_file:
+        corpus_object = stream_corpus(corpus)
+        
+        features = corpus_object.get_features_df()
+        cardinality_features = corpus_object.get_cardinality_features_df()
+        features = concat([features, cardinality_features], axis = 1)
+        del cardinality_features
+        
+        bed12_matrix_to_bedgraph(
+            normalize_to_windowlength = False,
+            regions_file = regions_file,
+            matrix = features.values,
+            feature_names = features.columns,
+            output = output,
+        )
+write_features_bedgraph_parser = subparsers.add_parser('corpus-write-features-bedgraph',
+    help = 'Write features in a corpus to a bedgraph file.'
+)
+write_features_bedgraph_parser.add_argument('corpus', type = file_exists)
+write_features_bedgraph_parser.add_argument('--output', '-o', type = argparse.FileType('w'),
+                                            default = sys.stdout)
+write_features_bedgraph_parser.set_defaults(func = corpus_write_features_bedgraph)
 
 
 

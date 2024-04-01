@@ -237,6 +237,38 @@ class SBSSample(Sample):
         return ax
     
 
+    @staticmethod
+    def extract_mutation_info(*, 
+        chrom : str, 
+        pos : int, 
+        ref : str, 
+        alt : str, 
+        fasta_object
+    ):
+
+        start = pos - 1; end = pos + 2
+        try:
+            context = fasta_object[chrom][start : end].seq.upper()
+        except KeyError as err:
+            raise KeyError('\tChromosome {} found in VCF file is not in the FASTA reference file'\
+                .format(chrom)) from err
+
+        oldnuc = context[1]
+
+        if not ref.upper() in 'ATCG' or not alt.upper() in 'ATCG':
+            raise WeirdMutationError('\tWeird mutation found at {}:{} {}->{}'.format(
+                chrom, str(pos), ref, alt
+            ))
+
+        assert oldnuc == ref, '\tLooks like the vcf file was constructed with a different reference genome, different ref allele found at {}:{}, found {} instead of {}'.format(
+            chrom, str(pos), oldnuc, ref 
+        )
+
+        context, alt, cardinality = convert_to_cosmic(context, alt)
+
+        return context, alt, cardinality
+    
+
     @classmethod
     def featurize_mutations(cls, 
                     vcf_file, regions_file, fasta_file,
@@ -254,25 +286,9 @@ class SBSSample(Sample):
             pos, ref, alt, weight = mutation_code.split('|')
             pos = int(pos)
 
-            start = pos - 1; end = pos + 2
-            try:
-                context = fasta_object[chrom][start : end].seq.upper()
-            except KeyError as err:
-                raise KeyError('\tChromosome {} found in VCF file is not in the FASTA reference file'\
-                    .format(chrom)) from err
-
-            oldnuc = context[1]
-
-            if not ref.upper() in 'ATCG' or not alt.upper() in 'ATCG':
-                raise WeirdMutationError('\tWeird mutation found at {}:{} {}->{}'.format(
-                    chrom, str(pos), ref, alt
-                ))
-
-            assert oldnuc == ref, '\tLooks like the vcf file was constructed with a different reference genome, different ref allele found at {}:{}, found {} instead of {}'.format(
-                chrom, str(pos), oldnuc, ref 
+            context, alt, cardinality = cls.extract_mutation_info(
+                chrom = chrom, pos = pos, ref = ref, alt = alt, fasta_object = fasta_object
             )
-
-            context, alt, cardinality = convert_to_cosmic(context, alt)
 
             return {
                 'chrom' : chrom,

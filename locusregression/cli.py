@@ -447,6 +447,7 @@ def ingest_sample(mutation_rate_bedgraph=None,
                   sample_name=None,
                   weight_col=None,
                   chr_prefix='',
+                  in_corpus=True,
                   *,corpus, sample_file, fasta_file
                 ):
     
@@ -466,10 +467,11 @@ def ingest_sample(mutation_rate_bedgraph=None,
             chr_prefix = chr_prefix,
             weight_col = weight_col,
             mutation_rate_file = mutation_rate_bedgraph,
+            in_corpus = in_corpus
         )
     
     sample.name = sample_name
-
+    logger.info(f'Sample ingestion done with {sample_name}')
     with buffered_writer(corpus) as h5_object:
         write_sample(h5_object, sample, sample_name)
 
@@ -481,6 +483,7 @@ ingest_sample_parser.add_argument('--weight-col','-w', type = str, default=None,
 ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_exists, default=None, help = 'Bedgraph file of mutation rates.')
 ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
+ingest_sample_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 ingest_sample_parser.set_defaults(func = ingest_sample)
 
 
@@ -715,7 +718,7 @@ def train_model(
         eval_every = 20,
         bound_tol = 1e-2,
         verbose = False,
-        n_jobs = 1,
+        n_jobs = 14, ## changed here sandra
         empirical_bayes = True,
         model_type = 'linear',
         begin_prior_updates = 10,
@@ -800,6 +803,7 @@ trainer_optional.add_argument('--num-epochs', '-epochs', type = posint, default 
 trainer_optional.add_argument('--bound-tol', '-tol', type = posfloat, default=1e-2,
     help = 'Early stop criterion, stop training if objective score does not increase by this much after one epoch.')
 trainer_optional.add_argument('--verbose','-v',action = 'store_true', default = False,)
+trainer_optional.add_argument('--n-jobs', '-j', type = posint, default=1)
 trainer_sub.set_defaults(func = train_model)
 
 

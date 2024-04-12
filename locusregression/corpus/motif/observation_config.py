@@ -14,10 +14,11 @@ import tempfile
 logger = logging.getLogger('SBS-DataReader')
 logger.setLevel(logging.INFO)
 
-complement = {'A' : 'T','T' : 'A','G' : 'C','C' : 'G'}
-
+trans_table = str.maketrans('ATCG', 'TAGC')
+def comp(seq):
+    return seq.translate(trans_table)
 def revcomp(seq):
-    return ''.join(reversed([complement[nuc] for nuc in seq]))
+    return seq[::-1].translate(trans_table)
 
 
 nucleotide_order = ['A','C','G','T']
@@ -89,7 +90,7 @@ class MotifSample(Sample):
 
     @staticmethod
     def plot_factorized(context_dist, mutation_dist, attribute_dist, 
-                        ax=None, figsize=(5,3), show_strand=True,**kwargs):
+                        ax=None, figsize=(5,3), show_strand=True, fontsize=5, show_xticks=True, **kwargs):
 
         #joint_prob = (context_dist[:,None]*mutation_dist).ravel() # CxM
         #event_name = [(to_cosmic_str(c,m),'f') if c[1] in 'TC' else (to_cosmic_str(revcomp(c), complement[m]), 'r')
@@ -118,8 +119,9 @@ class MotifSample(Sample):
         
         ax.bar(height = context_dist, **plot_kw)
         ax.set(yticks = [0,extent], xticks = [], 
-               xlim = (-1,len(CONTEXTS)), ylim = (-0.1, 1.1*extent))
-        ax.set_xticks(range(len(CONTEXTS)), CONTEXTS)
+               xlim = (-1,len(CONTEXTS)), ylim = (-1e-6, 1.1*extent))
+        if show_xticks:
+            ax.set_xticks(range(len(CONTEXTS)), CONTEXTS, fontsize=fontsize)
         ax.tick_params(axis='x', labelrotation=90)
         ax.axhline(0, color = 'lightgrey', linewidth = 0.25)
 
@@ -134,16 +136,16 @@ class MotifSample(Sample):
                     motif_file, regions_file, fasta_file,
                     chr_prefix = '', 
                     weight_col = None, 
-                    mutation_rate_file=None
+                    mutation_rate_file=None,
+                    in_corpus=True
                 ):
-
 
         def process_line(line, fasta_object, 
                          positive_file=True, in_corpus=True):
             
             fields = line.strip().split('\t')
             chrom=fields[0]; locus_idx=int(fields[3]); motif=fields[-1]
-            frag_start=int(fields[-5]); frag_end=int(fields[-4])
+            frag_start=int(fields[-5]); frag_end=int(fields[-4]) 
             
             # Will be used later
             gc_content = float(fields[-2])
@@ -152,10 +154,10 @@ class MotifSample(Sample):
             out_4mer = ""
 
             if positive_file:
-                out_4mer = reversed(motif[:4])
+                out_4mer = motif[:4][::-1]
                 in_4mer = motif[4:]
             else:
-                out_4mer = complement[motif[4:]]
+                out_4mer = comp(motif[4:])
                 in_4mer = revcomp(motif[:4])
         
             
@@ -182,22 +184,46 @@ class MotifSample(Sample):
                                                     + ('1\n' if weight_col is None else f'%INFO/{weight_col}\n')
 
         try:
+            # fix intersecting codes for fragment input (start position of fragment should be exist in each locus being intersected)
+            # Column number in awk is offset by the number of columns in regions_file
+            # Calculate the number of columns in regions_file
+            with open(regions_file, 'r') as f:
+                # Assuming that the file is not empty and has a header or at least one line
+                num_cols = len(f.readline().strip().split())
+            
+            # Construct the awk command with the correct column number for the start position from fragment input file
+            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && ${num_cols + 2} < $3) print}}'"
+            
+            # Now construct the full command, incorporating the dynamically constructed awk_cmd
+            cmd = (
+                f"bedtools intersect -a {regions_file} -b - -sorted -wa -wb -split | "
+                f"{awk_cmd}"
+            )
+            
             intersect_process = subprocess.Popen(
-                ['bedtools',
-                'intersect',
-                '-a', regions_file, 
-                '-b', '-', 
-                '-sorted',
-                '-wa','-wb',
-                '-split'],
+                cmd,
+                shell=True, 
                 stdin=open(motif_file),
                 stdout=subprocess.PIPE,
                 universal_newlines=True,
                 bufsize=10000,
             )
+            # intersect_process = subprocess.Popen(
+            #     ['bedtools',
+            #     'intersect',
+            #     '-a', regions_file, 
+            #     '-b', '-', 
+            #     '-sorted',
+            #     '-wa','-wb',
+            #     '-split'],
+            #     stdin=open(motif_file),
+            #     stdout=subprocess.PIPE,
+            #     universal_newlines=True,
+            #     bufsize=10000,
+            # )
 
             positive_file = ("pos_" in motif_file)
-            positive_file = True
+            # positive_file = True
             mutations_grouped = {}
             last_line =  ""
             max_locus_processed = 0
@@ -208,7 +234,7 @@ class MotifSample(Sample):
                     if not line:
                         break
             
-                    line_dict = process_line(line, fa, positive_file=True, in_corpus=True)
+                    line_dict = process_line(line, fa, positive_file=positive_file, in_corpus=in_corpus)
                     last_line = line
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
@@ -246,7 +272,7 @@ class MotifSample(Sample):
 
 
     @classmethod
-    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1, positive_file=True):
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1, positive_file=True, in_corpus=True):
     
         def count_fournucs(bed12_region, fasta_object):
 
@@ -256,22 +282,29 @@ class MotifSample(Sample):
 
             fournuc_counts = Counter()
             N_counts=0
+            # sandra fixed: for fragment input we don't need to consider only exonic region. so DON'T use bed12_region.segments()
+            chrom = bed12_region.chromosome
+            start = bed12_region.start
+            end = bed12_region.end
+            # for chrom, start, end in bed12_region:
 
-            for chrom, start, end in bed12_region.segments():
+            window_sequence = fasta_object[chrom][max(start-1,0) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
 
-                window_sequence = fasta_object[chrom][start : end].seq.upper()
-
-                for fournuc in rolling(window_sequence):
+            for fournuc in rolling(window_sequence):
+                if positive_file:
                     if not 'N' in fournuc:
                         fournuc_counts[fournuc]+=1
+  
                     else:
                         N_counts+=1
+                else:
+                    pass
 
             pseudocount = N_counts/(4**4)
 
             return [
-                [fournuc_counts[revcomp(context)]/2 + fournuc_counts[context]/2 + 2*pseudocount for context in CONTEXTS]
-            ]
+                [fournuc_counts[context]+pseudocount for context in CONTEXTS]
+            ] # sandra fixed: frequency is calculated in the 5' to 3' direction (not averaged with 3' to 5')
         
         with Fasta(fasta_file) as fasta_object:
             fournuc_matrix = [

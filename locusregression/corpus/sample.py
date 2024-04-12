@@ -31,6 +31,7 @@ class Sample:
     chrom : np.ndarray = None
     pos : np.ndarray = None
     weight : np.ndarray = None
+    
 
 
     type_map = {
@@ -50,8 +51,8 @@ class Sample:
     required = ['attribute', 'mutation','context','locus','cardinality']
     mutation_attrs = ['attribute','mutation','context','locus','cardinality','weight','chrom','pos']
 
-    N_CARDINALITY=2
-    N_CONTEXTS=32
+    N_CARDINALITY=1
+    N_CONTEXTS=256
     N_MUTATIONS=3
     N_ATTRIBUTES=1
 

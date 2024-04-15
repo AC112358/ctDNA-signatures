@@ -238,7 +238,8 @@ class SBSSample(Sample):
     
 
     @staticmethod
-    def extract_mutation_info(*, 
+    def extract_mutation_info(
+        check_ref=True,*, 
         chrom : str, 
         pos : int, 
         ref : str, 
@@ -260,13 +261,18 @@ class SBSSample(Sample):
                 chrom, str(pos), ref, alt
             ))
 
-        assert oldnuc == ref, '\tLooks like the vcf file was constructed with a different reference genome, different ref allele found at {}:{}, found {} instead of {}'.format(
-            chrom, str(pos), oldnuc, ref 
-        )
+        if check_ref:
+            assert oldnuc == ref, '\tLooks like the vcf file was constructed with a different reference genome, different ref allele found at {}:{}, found {} instead of {}'.format(
+                chrom, str(pos), oldnuc, ref 
+            )
 
         context, alt, cardinality = convert_to_cosmic(context, alt)
 
         return context, alt, cardinality
+    
+    @classmethod
+    def idx_code_mutation(cls, context, mutation):
+        return CONTEXT_IDX[context], MUTATIONS_IDX[context][mutation]
     
 
     @classmethod

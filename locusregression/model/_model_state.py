@@ -139,7 +139,7 @@ class ModelState:
             X_tau_combinations = [
                 _strand + _intercept
                 for _strand in strand_combinations
-                for _intercept in list(map(list, np.eye(self.n_distributions, dtype=int)))
+                for _intercept in map(tuple, np.eye(self.n_distributions, dtype=int))
             ]
 
             self._tau_combinations_map = dict(zip(X_tau_combinations, range(len(X_tau_combinations))))

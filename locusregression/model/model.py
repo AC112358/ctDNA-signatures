@@ -16,12 +16,17 @@ from seaborn import stripplot, violinplot
 logger = logging.getLogger(' LocusRegressor')
 
 
-def _multinomial_deviance(y, y_hat):
-    return 2*( xlogy(y, y/y.sum()).sum() - xlogy(y, y_hat/y_hat.sum()).sum() )
+def _multinomial_deviance(y, y_sat, y_hat):
+    return 2*( xlogy(y, y_sat).sum() - xlogy(y, y_hat).sum() )
 
 
-def _pseudo_r2(y, y_hat, y_null):
-    return 1 - _multinomial_deviance(y, y_hat)/_multinomial_deviance(y, y_null)
+def _pseudo_r2(y, y_hat, context_frequencies):
+    
+    base_normalized_probabilities = np.nan_to_num( y_hat/context_frequencies, 0. )
+    y_saturated = np.nan_to_num( (y/y.sum())/context_frequencies, 0. )
+    y_null = 1/context_frequencies.sum()
+
+    return 1 - _multinomial_deviance(y, y_saturated, base_normalized_probabilities)/_multinomial_deviance(y, y_saturated, y_null)
 
 
 def _get_observation_likelihood(*,model_state, sample, corpus_state):
@@ -782,12 +787,13 @@ class LocusRegressor:
         
         empirical_mr = corpus.get_empirical_mutation_rate()
 
-        logger.info('Prediction mutation rate ...')
+        logger.info('Predicting mutation rate ...')
         predicted_mr = np.exp(self.get_log_marginal_mutation_rate(corpus))
-        y_null = corpus.context_frequencies
-
+        
+        # we want to evalutate the model predictions accounting for uncertainty of mutation position
+        # *within* bins. This means that a model that uses larger bins will be appropriately penalized.
         logger.info('Calculating deviance ...')
-        return _pseudo_r2(empirical_mr, predicted_mr, y_null)
+        return _pseudo_r2(empirical_mr, predicted_mr, corpus.context_frequencies)
     
 
 
@@ -1086,14 +1092,80 @@ class LocusRegressor:
 
         return ax
 
-         
-        
-        
+
+    def deepscan_segment(self,*,corpus, chrom, start, end, fasta):
+        """
+        Predict the mutation rate for a given segment.
+
+        Parameters:
+        corpus (Corpus): The corpus to predict the mutation rate for.
+        segment (int): The segment to predict the mutation rate for.
+        component (str): The component to predict the mutation rate for.
+        n_jobs (int): The number of jobs to run in parallel.
+
+        Returns:
+        float: The predicted mutation rate for the segment.
+        """
+        import tempfile
+        import subprocess
+        from pyfaidx import Fasta
 
 
+        with tempfile.NamedTemporaryFile() as regions_file, \
+            tempfile.NamedTemporaryFile() as segment_bedgraph:
+            
+            with open(regions_file.name, 'w') as f:
+                for region in corpus.regions:
+                    if region.chromosome == chrom:
+                        print(region, file=f)
 
-   
-        
+            with open(segment_bedgraph.name, 'w') as f:
+                for b in range(start, end):
+                    print(f'{chrom}\t{b}\t{b+1}', file=f)
 
 
-        
+            intersect_output = subprocess.check_output([
+                'bedtools', 'intersect',
+                '-b', regions_file.name,
+                '-a', segment_bedgraph.name,
+                '-wa',
+                '-wb',
+                '-sorted',
+            ]).decode('utf-8').split('\n')
+
+        query_bases=[]
+        for line in intersect_output:
+            if line == '':
+                continue
+
+            chrom, start, _, _, _, _, region_idx = line.split('\t')
+
+            start=int(start); region_idx=int(region_idx)
+            query_bases.append((chrom, start, region_idx))
+
+        subset_regions = sorted(list(set(list(zip(*query_bases))[2])))
+        subset_corpus = corpus.subset_regions(subset_regions)
+
+        # is shape KxCx2xL
+        component_mutation_rate = np.exp(self.get_log_component_mutation_rate(subset_corpus))
+        region_idx_to_new_idx_map = {region_idx: i for i, region_idx in enumerate(subset_regions)}
+
+        SampleClass = corpus.observation_class
+
+        with Fasta(fasta) as fa:
+            
+            for chrom, pos, region_idx in query_bases:
+                
+                context, mutation, direction = SampleClass.extract_mutation_info(
+                    check_ref=False,
+                    ref='A',
+                    alt='A',
+                    chrom=chrom,
+                    pos=pos,
+                    fasta_object=fa,
+                )
+
+                context_idx, _, = SampleClass.idx_code_mutation(context, mutation)
+                accessor_idx = region_idx_to_new_idx_map[region_idx]
+                
+                yield component_mutation_rate[:, context_idx, direction, accessor_idx]

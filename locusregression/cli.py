@@ -947,7 +947,8 @@ def get_mutation_rate_wrapper(*, model, corpus, output):
         # Remove the effect for each context and direction by summing over 0,1 axes
 
         logger.info('Calculating marginal mutation rates ...')
-        mr = np.exp(model.get_log_marginal_mutation_rate(corpus)).sum((0,1))
+        mr = np.exp(model.get_log_marginal_mutation_rate(corpus))\
+                .sum((0,1)) * corpus.num_mutations
 
         logger.info('Writing mutation rates to bedgraph ...')
         bed12_matrix_to_bedgraph(

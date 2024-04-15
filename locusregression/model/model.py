@@ -13,6 +13,7 @@ import logging
 from scipy.special import xlogy
 from shap import Explanation
 from seaborn import stripplot, violinplot
+from joblib import Parallel, delayed
 logger = logging.getLogger(' LocusRegressor')
 
 
@@ -37,19 +38,19 @@ def _get_observation_likelihood(*,model_state, sample, corpus_state):
                 + np.log(model_state.lambda_[k][None,:,None])
             )
     '''
-    
+
     flattend_phi = (
         np.log(model_state.rho_)[:, sample.context, sample.mutation] \
         + np.squeeze(corpus_state.cardinality_effects_, axis=2)[:, sample.cardinality, sample.locus] \
-        + np.log(corpus_state.context_frequencies[sample.cardinality, sample.context, sample.locus]) \
+        + np.log(corpus_state.context_frequencies[sample.cardinality, sample.context, sample.locus]+1e-10) \
         + np.log(model_state.lambda_[:, sample.context]) \
         + np.log(corpus_state.exposures[:, sample.locus]) \
         + corpus_state.theta_[:, sample.locus] \
         - corpus_state.log_denom_
-    )
+    ) # sandra: here some locus have corpus_state.context_frequencies values 0, so it makes -inf values --> for now add a smoothing term (e.g. 1e-10) 
     
     exp_phi = np.nan_to_num(np.exp(flattend_phi), nan=0)
-
+    
     if not np.all(np.isfinite(exp_phi)):
         print('problem!')
 
@@ -230,7 +231,7 @@ class LocusRegressor:
         model_state,
         corpus_state,
     ):
-        
+
         flattend_phi = _get_observation_likelihood(
                 model_state=model_state,
                 sample=sample,
@@ -241,20 +242,23 @@ class LocusRegressor:
         gamma = gamma0.copy()
         
         for _ in range(self.estep_iterations): # inner e-step loop
-            
             old_gamma = gamma.copy()
             exp_Elog_gamma = np.exp(log_dirichlet_expectation(gamma)[:,None])
 
             gamma = _estep_update(exp_Elog_gamma, corpus_state.alpha, flattend_phi, count_g,
-                                 likelihood_scale=1/locus_subsample_rate)
+                                 likelihood_scale=1/locus_subsample_rate)  ## after this step, all gamma become nan values
 
             if np.abs(gamma - old_gamma).mean() < self.difference_tol:
                 break
-        else:
-            logger.debug('E-step did not converge. If this happens frequently, consider increasing "estep_iterations".')
+                        
+            elif np.isnan(gamma).all():
+                logger.warn('after E-step all gamma is nan.')
+                break
+                
+            else:
+                logger.debug('E-step did not converge. If this happens frequently, consider increasing "estep_iterations".')
 
         gamma = (1 - learning_rate)*gamma0 + learning_rate*gamma
-
         phi_matrix = _calc_local_variables(gamma = gamma, flattend_phi=flattend_phi)
         weighted_phi = phi_matrix * count_g.T/(locus_subsample_rate * batch_subsample_rate)
 
@@ -275,34 +279,72 @@ class LocusRegressor:
             corpus_states,
             gamma,
         ):
+
         
         sstat_collections = {
             corp.name : self.SSTATS.CorpusSstats(model_state) 
             for corp in corpus.corpuses
         }
-
-        sample_num = 0
-        gammas = []
-        for gamma_g, sample in zip(gamma, corpus):
+        with TimerContext('sample inference'):
+            sample_num = 0
+            gammas = []
+            for gamma_g, sample in zip(gamma, corpus):
+                
+                sample_sstats = self._sample_inference(
+                            sample = sample,
+                            gamma0 = gamma_g, 
+                            locus_subsample_rate = locus_subsample_rate,
+                            batch_subsample_rate = batch_subsample_rate,
+                            learning_rate = learning_rate,
+                            model_state = model_state,
+                            corpus_state = corpus_states[sample.corpus_name]
+                        )
+                
+                sample_num += 1
+                
+                sstat_collections[sample.corpus_name] += sample_sstats
+                gammas.append(sample_sstats.gamma)
             
-            sample_sstats = self._sample_inference(
-                        sample = sample,
-                        gamma0 = gamma_g, 
-                        locus_subsample_rate = locus_subsample_rate,
-                        batch_subsample_rate = batch_subsample_rate,
-                        learning_rate = learning_rate,
-                        model_state = model_state,
-                        corpus_state = corpus_states[sample.corpus_name]
-                    )
-            
-            sample_num += 1
-
-            sstat_collections[sample.corpus_name] += sample_sstats
-            gammas.append(sample_sstats.gamma)
-
         return self.SSTATS.MetaSstats(sstat_collections), np.vstack(gammas)
         
+    def _inference_with_joblib(self,
+                           locus_subsample_rate=1,
+                           batch_subsample_rate=1,
+                           learning_rate=1,*,
+                           corpus,
+                           model_state,
+                           corpus_states,
+                           gamma):
 
+        sstat_collections = {
+            corp.name: self.SSTATS.CorpusSstats(model_state)
+            for corp in corpus.corpuses
+        }
+
+        def inference_task(sample, gamma_g):
+            sample_sstats = self._sample_inference(
+                sample=sample,
+                gamma0=gamma_g,
+                locus_subsample_rate=locus_subsample_rate,
+                batch_subsample_rate=batch_subsample_rate,
+                learning_rate=learning_rate,
+                model_state=model_state,
+                corpus_state=corpus_states[sample.corpus_name]
+            )
+            return sample.corpus_name, sample_sstats
+            
+        with TimerContext('sample inference'):
+            # Using joblib for parallel processing
+            results = Parallel(n_jobs=self.n_jobs)(delayed(inference_task)(sample, gamma_g) for sample, gamma_g in zip(corpus, gamma))
+        
+            gammas = []
+            for corpus_name, sample_sstats in results:
+                sstat_collections[corpus_name] += sample_sstats
+                gammas.append(sample_sstats.gamma)
+    
+        return self.SSTATS.MetaSstats(sstat_collections), np.vstack(gammas)
+
+    
     def _update_corpus_states(self):
         for corpusstate in self.corpus_states.values():
             corpusstate.update(self.model_state)
@@ -396,7 +438,6 @@ class LocusRegressor:
         if locus_svi:
             update_loci = self.random_state.choice(self.n_loci, size = n_subsample_loci, replace = False)
             inner_corpus = inner_corpus.subset_loci(update_loci)
-
             inner_corpus_states = {
                 name : state.subset_corpusstate(inner_corpus.get_corpus(name), update_loci)
                 for name, state in self.corpus_states.items()
@@ -447,7 +488,7 @@ class LocusRegressor:
             for epoch in range(self.epochs_trained+1, self.num_epochs+1):
 
                 start_time = time.time()
-                
+
                 inner_corpus, inner_corpus_states, update_samples = \
                             self._subsample_corpus(
                                                 corpus = corpus, 
@@ -457,8 +498,8 @@ class LocusRegressor:
                                                 )
                 
                 with TimerContext('E-step'):
-
-                    sstats, new_gamma = self._inference(
+                    
+                    sstats, new_gamma = self._inference_with_joblib(
                                 locus_subsample_rate=self.locus_subsample,
                                 batch_subsample_rate=self.batch_size/self.n_samples,
                                 learning_rate=learning_rate_fn(epoch),
@@ -467,7 +508,7 @@ class LocusRegressor:
                                 corpus_states = inner_corpus_states,
                                 gamma = self._gamma[update_samples]
                             )
-
+                    
                 self._gamma[update_samples, :] = new_gamma.copy()
 
                 with TimerContext('M-step'):
@@ -489,13 +530,6 @@ class LocusRegressor:
                 if (not self.eval_every is None) and epoch % self.eval_every == 0:
                     
                     with TimerContext('Calculating bound'):
-
-                        '''_, gamma = self._inference(
-                                corpus = corpus,
-                                model_state = self.model_state,
-                                corpus_states = self.corpus_states,
-                                gamma = self._init_doc_variables(len(corpus))
-                            )'''
                         
                         elbo = self._bound(
                                 corpus = corpus,
@@ -815,8 +849,9 @@ class LocusRegressor:
     def plot_signature(self, component, ax = None, 
                        figsize = (5.5,3), 
                        normalization = 'global', 
-                       fontsize=7,
-                       show_strand=True):
+                       fontsize=5,
+                       show_strand=True,
+                       show_xticks=True):
         '''
         Plot signature.
         '''
@@ -831,6 +866,7 @@ class LocusRegressor:
             figsize = figsize,
             fontsize = fontsize,
             show_strand=show_strand,
+            show_xticks=show_xticks
         )
 
         return ax
@@ -909,9 +945,14 @@ class LocusRegressor:
         ax = np.atleast_2d(ax)
 
         for i, comp in enumerate(components):
-            self.plot_signature(comp, ax=ax[i,0])
+            if i < len(components)-1:
+                self.plot_signature(comp, ax=ax[i,0], show_xticks=False)
+            else:
+                 self.plot_signature(comp, ax=ax[i,0])
             ax[i,0].set_title('')
             ax[i,0].set_ylabel(comp, fontsize=7)
+            ax[i,0].xaxis.set_ticks_position('none') 
+                
 
             if self.model_state.fit_cardinality_:
                 self.plot_cardinality_bias(comp, ax=ax[i,1], fontsize=7)

@@ -7,7 +7,8 @@ from tqdm import trange
 import sys
 from numpy import exp
 from functools import partial
-
+import logging
+logger = logging.getLogger(' LocusRegressor')
 def objective(trial,
             min_components = 2, 
             max_components = 10,

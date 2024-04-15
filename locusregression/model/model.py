@@ -335,7 +335,7 @@ class LocusRegressor:
             
         with TimerContext('sample inference'):
             # Using joblib for parallel processing
-            results = Parallel(n_jobs=13)(delayed(inference_task)(sample, gamma_g) for sample, gamma_g in zip(corpus, gamma))
+            results = Parallel(n_jobs=self.n_jobs)(delayed(inference_task)(sample, gamma_g) for sample, gamma_g in zip(corpus, gamma))
         
             gammas = []
             for corpus_name, sample_sstats in results:
@@ -499,16 +499,6 @@ class LocusRegressor:
                 
                 with TimerContext('E-step'):
                     
-                    # sstats, new_gamma = self._inference(
-                    #             locus_subsample_rate=self.locus_subsample,
-                    #             batch_subsample_rate=self.batch_size/self.n_samples,
-                    #             learning_rate=learning_rate_fn(epoch),
-                    #             corpus = inner_corpus,
-                    #             model_state = self.model_state,
-                    #             corpus_states = inner_corpus_states,
-                    #             gamma = self._gamma[update_samples]
-                    #         )
-                    
                     sstats, new_gamma = self._inference_with_joblib(
                                 locus_subsample_rate=self.locus_subsample,
                                 batch_subsample_rate=self.batch_size/self.n_samples,
@@ -540,13 +530,6 @@ class LocusRegressor:
                 if (not self.eval_every is None) and epoch % self.eval_every == 0:
                     
                     with TimerContext('Calculating bound'):
-
-                        '''_, gamma = self._inference(
-                                corpus = corpus,
-                                model_state = self.model_state,
-                                corpus_states = self.corpus_states,
-                                gamma = self._init_doc_variables(len(corpus))
-                            )'''
                         
                         elbo = self._bound(
                                 corpus = corpus,

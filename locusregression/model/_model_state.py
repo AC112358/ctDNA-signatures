@@ -289,10 +289,10 @@ class ModelState:
                 (self.lambda_[k][None, :, None] * corpus_state.context_frequencies).sum(1) * \
                 corpus_state.exposures * np.exp(corpus_state.theta_[k])[None,:]
             ).ravel()
-        logger.info(f"corpus_states.keys(): {corpus_states.keys()}; corpus_states.values(): {corpus_states.values()}") ## sandra
+        logger.debug(f"corpus_states.keys(): {corpus_states.keys()}; corpus_states.values(): {corpus_states.values()}") ## sandra
         eta = np.concatenate([_get_cardinality_exposure(state) for state in corpus_states.values()]) # I x C -> I*C
         target = np.concatenate([sstats[name].tau_sstats(k, n_bins).ravel() for name in corpus_states.keys()])
-        logger.info(f"design_matrix: {design_matrix.shape}; eta: {eta.shape}; target: {target.shape}") ## sandra 
+        logger.debug(f"design_matrix: {design_matrix.shape}; eta: {eta.shape}; target: {target.shape}") ## sandra 
         eta = design_matrix.dot(eta); target = design_matrix.dot(target) ## sandra;  dimension mismatch error occurred here since cardinality_dim of motif is 1 
 
         m = (target/eta).mean()

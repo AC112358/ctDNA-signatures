@@ -11,7 +11,7 @@ import tqdm
 import subprocess
 import os
 import tempfile
-logger = logging.getLogger('SBS-DataReader')
+logger = logging.getLogger('Motif-DataReader')
 logger.setLevel(logging.INFO)
 
 trans_table = str.maketrans('ATCG', 'TAGC')
@@ -191,8 +191,11 @@ class MotifSample(Sample):
                 # Assuming that the file is not empty and has a header or at least one line
                 num_cols = len(f.readline().strip().split())
             
-            # Construct the awk command with the correct column number for the start position from fragment input file
-            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && ${num_cols + 2} < $3) print}}'"
+            # Construct the awk command with the correct column number for the start/end position from fragment input file
+            if in_corpus:
+                awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && ${num_cols + 2} < $3) print}}'" # for in5p, start pos of fragment should be exist in locus
+            else:
+                awk_cmd = f"awk '{{if (($2 <= ${num_cols + 2} && $2 <= ${num_cols + 3})&& (${num_cols + 2} < $3 && ${num_cols + 3} < $3)) print}}'" # for out5p, both start and end pos of fragment should be exist in locus
             
             # Now construct the full command, incorporating the dynamically constructed awk_cmd
             cmd = (

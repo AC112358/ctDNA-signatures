@@ -718,7 +718,7 @@ def train_model(
         eval_every = 20,
         bound_tol = 1e-2,
         verbose = False,
-        n_jobs = 14, ## changed here sandra
+        n_jobs = 1,
         empirical_bayes = True,
         model_type = 'linear',
         begin_prior_updates = 10,

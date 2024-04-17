@@ -6,6 +6,7 @@ import logging
 from .sample import SampleLoader, InMemorySamples
 from .sbs.observation_config import SBSSample
 from .motif.observation_config import MotifSample
+from .length.observation_config import LengthSample
 from pandas import DataFrame
 from tqdm import trange
 logger = logging.getLogger('Corpus')
@@ -115,6 +116,8 @@ class Corpus(CorpusMixin):
             return SBSSample
         elif classname.lower() == 'fragment-motif':
             return MotifSample
+        elif classname.lower() == 'fragment-length':
+            return LengthSample
         else:
             raise ValueError(f'Unknown corpus type {classname}')
 

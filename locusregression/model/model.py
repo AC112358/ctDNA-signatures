@@ -46,7 +46,7 @@ def _get_observation_likelihood(*,model_state, sample, corpus_state):
     flattend_phi = (
         np.log(model_state.rho_)[:, sample.context, sample.mutation] \
         + np.squeeze(corpus_state.cardinality_effects_, axis=2)[:, sample.cardinality, sample.locus] \
-        + np.log(corpus_state.context_frequencies[sample.cardinality, sample.context, sample.locus]+1e-10) \
+        + np.log(corpus_state.context_frequencies[sample.cardinality, sample.context, sample.locus]) \
         + np.log(model_state.lambda_[:, sample.context]) \
         + np.log(corpus_state.exposures[:, sample.locus]) \
         + corpus_state.theta_[:, sample.locus] \

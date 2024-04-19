@@ -3,7 +3,6 @@ from ..sample import Sample
 from ..reader_utils import read_windows
 import numpy as np
 import matplotlib.pyplot as plt
-from .mutation_preprocessing import get_passed_SNVs
 from pyfaidx import Fasta
 import numpy as np
 from collections import Counter, defaultdict
@@ -145,8 +144,12 @@ class MotifSample(Sample):
                          positive_file=True, in_corpus=True):
             
             fields = line.strip().split('\t')
-            chrom=fields[0]; locus_idx=int(fields[3]); motif=fields[-1]
-            frag_start=int(fields[-5]); frag_end=int(fields[-4]) 
+
+            # @Sandra: in the future, these hard-coded indices will need to be replaced with a more robust method
+            # Potentially, we could start from a BAM file instead of the custom fragment file format.
+            # The first four columns will be chr,start,end,locus_idx, then the rest of the columns will be from the motif file.
+            chrom=fields[0]; locus_idx=int(fields[3]); #motif=fields[-1]
+            frag_start=int(fields[5]); frag_end=int(fields[6]) 
             
             '''# Will be used later
             #gc_content = float(fields[-2])

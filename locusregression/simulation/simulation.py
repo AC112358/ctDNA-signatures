@@ -6,6 +6,8 @@ import os
 import tqdm
 from joblib import Parallel, delayed
 from functools import partial
+import pandas as pd
+from itertools import product
 
 TRANSITION_MATRIX = np.array([
     [0.99, 0.005, 0.005],
@@ -39,6 +41,8 @@ def revcomp(seq):
 with open(os.path.join(os.path.dirname(__file__), 'cosmic.json'),'r') as f:
     COSMIC_SIGS = json.load(f)
 
+IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'MSK_allreads_W_in5p_NMF_10_20_17.csv'), index_col=0)
+IN5P_SIGS = IN5P_SIGS.to_dict()
 
 class SimulatedCorpus:
 
@@ -54,6 +58,21 @@ class SimulatedCorpus:
             sigmatrix[CONTEXT_IDX[context], MUTATIONS_IDX[context][mutation]] += p
 
         return sigmatrix
+
+    @staticmethod
+    def motif_sig_to_matrix(motif_sig):
+        CONTEXTS = sorted(
+            map(lambda x : ''.join(x), product('ATCG','ATCG','ATCG', 'ATCG')), 
+            key = lambda x : (x[0], x[1], x[2], x[3])
+            )
+        
+        CONTEXT_IDX = dict(zip(CONTEXTS, range(len(CONTEXTS))))
+        sigmatrix = np.zeros((len(CONTEXT_IDX),1))
+    
+        for context, p in motif_sig.items():
+            sigmatrix[CONTEXT_IDX[context], 0] = p
+    
+        return sigmatrix    
 
 
     @staticmethod

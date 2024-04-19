@@ -104,7 +104,8 @@ class MotifSample(Sample):
 
         
         if ax is None:
-            _, ax = plt.subplots(1,1,figsize= figsize)
+            fig, ax = plt.subplots(1,1,figsize= figsize)
+            fig.set_dpi(300)
 
         plot_kw = dict(
             x = range(len(CONTEXTS)),
@@ -121,8 +122,10 @@ class MotifSample(Sample):
         ax.set(yticks = [0,extent], xticks = [], 
                xlim = (-1,len(CONTEXTS)), ylim = (-1e-6, 1.1*extent))
         if show_xticks:
-            ax.set_xticks(range(len(CONTEXTS)), CONTEXTS, fontsize=fontsize)
-        ax.tick_params(axis='x', labelrotation=90)
+            ax.set_xticks(range(len(CONTEXTS)))  # Set the ticks locations
+            ax.set_xticklabels(CONTEXTS, fontsize=fontsize, rotation=90)  # Set the labels with rotation
+        else:
+            ax.set_xticklabels([])
         ax.axhline(0, color = 'lightgrey', linewidth = 0.25)
 
         for s in ['left','right','top','bottom']:

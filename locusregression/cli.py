@@ -620,6 +620,7 @@ model_options.add_argument('--batch-size','-batch', type = posint, default = 128
 model_options.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
 model_options.add_argument('--pi-prior', '-pi', type = posfloat, default = 1.,
     help = 'Dirichlet prior over sample mixture compositions. A value > 1 will give more dense compositions, which <1 finds more sparse compositions.')
+model_options.add_argument('--n-jobs', '-j', type = posint, default=1)
 tune_sub.set_defaults(func = create_study)
 
 

@@ -1,8 +1,8 @@
 from itertools import product
 from ..sample import Sample
+from ..reader_utils import read_windows
 import numpy as np
 import matplotlib.pyplot as plt
-from .mutation_preprocessing import get_passed_SNVs
 from pyfaidx import Fasta
 import numpy as np
 from collections import Counter, defaultdict
@@ -147,11 +147,15 @@ class MotifSample(Sample):
                          positive_file=True, in_corpus=True):
             
             fields = line.strip().split('\t')
-            chrom=fields[0]; locus_idx=int(fields[3]); motif=fields[-1]
-            frag_start=int(fields[-5]); frag_end=int(fields[-4]) 
+
+            # @Sandra: in the future, these hard-coded indices will need to be replaced with a more robust method
+            # Potentially, we could start from a BAM file instead of the custom fragment file format.
+            # The first four columns will be chr,start,end,locus_idx, then the rest of the columns will be from the motif file.
+            chrom=fields[0]; locus_idx=int(fields[3]); #motif=fields[-1]
+            frag_start=int(fields[5]); frag_end=int(fields[6]) 
             
-            # Will be used later
-            gc_content = float(fields[-2])
+            '''# Will be used later
+            #gc_content = float(fields[-2])
 
             in_4mer = ""
             out_4mer = ""
@@ -162,14 +166,19 @@ class MotifSample(Sample):
             else:
                 out_4mer = comp(motif[4:])
                 in_4mer = revcomp(motif[:4])
-        
             
             context = ""
             if in_corpus:
                 context = in_4mer
             else:
-                context = out_4mer
-
+                context = out_4mer'''
+            
+            # @sandra: Can get the fragment end motifs from the fasta file - requires no preprocessing of fragment file
+            if positive_file and in_corpus:
+                context = fasta_object[chrom][frag_start-1:frag_start+3].seq.upper()
+            else:
+                raise NotImplementedError("Only positive_file and in_corpus=True is supported")
+            
             return {
                 'chrom' : chrom,
                 'locus' : locus_idx,
@@ -180,29 +189,55 @@ class MotifSample(Sample):
                 'pos' : int(frag_start), # irrelevant since we merge mutations
                 'cardinality': 0 # not using cardinality for motifs
             }
+
+
+        # fix intersecting codes for fragment input (start position of fragment should be exist in each locus being intersected)
+        # Column number in awk is offset by the number of columns in regions_file
+        # Calculate the number of columns in regions_file
+        #with open(regions_file, 'r') as f:
+        #    # Assuming that the file is not empty and has a header or at least one line
+        #    num_cols = len(f.readline().strip().split())
+        num_cols = 4
+        # Construct the awk command with the correct column number for the start/end position from fragment input file
+
+        if in_corpus:
+            # condition 1: start of region should match or be less than the start of the fragment
+            # condition 2: end of region should be greater than the start of the fragment
+            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'" # for in5p, start pos of fragment should be exist in locus
+        else:
+            awk_cmd = f"awk '{{if (($2 <= ${num_cols + 2} && $2 <= ${num_cols + 3})&& (${num_cols + 2} < $3 && ${num_cols + 3} < $3)) print}}'" # for out5p, both start and end pos of fragment should be exist in locus
+
+
+        # @Sandra: changes to make mesoscale features work:
+        # 1. Read the regions_file and break it into the "exon" segments
+        # 2. Write each segment to a temporary bed file, but with the region name as the 4th column
+        # 3. Use bedtools intersect to intersect the motif file with the temporary bed file
+        # This allows you to run your awk command to check intersection rules, but for each exon segment instead of the whole region
         
+        ##
+        # 1.
+        ## 
+        segments = []
+        for region in read_windows(regions_file):
+            for chr, start, end in region.segments():
+                segments.append((chr, start, end, region.name))
 
+        segments = sorted(segments, key=lambda x: (x[0], x[1]))
 
-        query_statement = chr_prefix + '%CHROM\t%POS0\t%POS0\t%POS0|%REF|%ALT|' \
-                                                    + ('1\n' if weight_col is None else f'%INFO/{weight_col}\n')
+        ##
+        # 2.
+        ##
+        with tempfile.NamedTemporaryFile() as temp_file:
+            with open(temp_file.name, 'w') as output:
+                for row in segments:
+                    print(*row, sep='\t', file=output)
 
-        try:
-            # fix intersecting codes for fragment input (start position of fragment should be exist in each locus being intersected)
-            # Column number in awk is offset by the number of columns in regions_file
-            # Calculate the number of columns in regions_file
-            with open(regions_file, 'r') as f:
-                # Assuming that the file is not empty and has a header or at least one line
-                num_cols = len(f.readline().strip().split())
-            
-            # Construct the awk command with the correct column number for the start/end position from fragment input file
-            if in_corpus:
-                awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && ${num_cols + 2} < $3) print}}'" # for in5p, start pos of fragment should be exist in locus
-            else:
-                awk_cmd = f"awk '{{if (($2 <= ${num_cols + 2} && $2 <= ${num_cols + 3})&& (${num_cols + 2} < $3 && ${num_cols + 3} < $3)) print}}'" # for out5p, both start and end pos of fragment should be exist in locus
-            
+            ##
+            # 3.
+            ##
             # Now construct the full command, incorporating the dynamically constructed awk_cmd
             cmd = (
-                f"bedtools intersect -a {regions_file} -b - -sorted -wa -wb -split | "
+                f"bedtools intersect -a {temp_file.name} -b - -sorted -wa -wb | "
                 f"{awk_cmd}"
             )
             
@@ -214,24 +249,10 @@ class MotifSample(Sample):
                 universal_newlines=True,
                 bufsize=10000,
             )
-            # intersect_process = subprocess.Popen(
-            #     ['bedtools',
-            #     'intersect',
-            #     '-a', regions_file, 
-            #     '-b', '-', 
-            #     '-sorted',
-            #     '-wa','-wb',
-            #     '-split'],
-            #     stdin=open(motif_file),
-            #     stdout=subprocess.PIPE,
-            #     universal_newlines=True,
-            #     bufsize=10000,
-            # )
 
             positive_file = ("pos_" in motif_file)
             # positive_file = True
             mutations_grouped = {}
-            last_line =  ""
             max_locus_processed = 0
             with Fasta(fasta_file) as fa:
 
@@ -241,7 +262,7 @@ class MotifSample(Sample):
                         break
             
                     line_dict = process_line(line, fa, positive_file=positive_file, in_corpus=in_corpus)
-                    last_line = line
+                    #last_line = line
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
 
@@ -251,30 +272,26 @@ class MotifSample(Sample):
                     for key in line_dict:
                         if key == "weight":
                             mutations_grouped[mutation_group_key]["weight"] = mutations_grouped[mutation_group_key].get("weight", 0) + \
-                                                                              line_dict["weight"]
+                                                                                line_dict["weight"]
                         else:
                             mutations_grouped[mutation_group_key][key] = line_dict[key] # so pos & attribute are constantly overwritten, can't be used as of now
 
             intersect_process.communicate()
 
-            mutations = defaultdict(list)
+        mutations = defaultdict(list)
 
-            for key in mutations_grouped:
-                mutation_dict = mutations_grouped[key]
-                for k, v in mutation_dict.items():
-                    mutations[k].append(v)
-            
-            for k, v in mutations.items():
-                mutations[k] = np.array(v).astype(MotifSample.type_map[k])
-
-            return cls(
-                **mutations,
-                name = os.path.abspath(motif_file),
-                )
+        for key in mutations_grouped:
+            mutation_dict = mutations_grouped[key]
+            for k, v in mutation_dict.items():
+                mutations[k].append(v)
         
-        finally:
-            if not mutation_rate_file is None:
-                clustered_vcf.close()
+        for k, v in mutations.items():
+            mutations[k] = np.array(v).astype(MotifSample.type_map[k])
+
+        return cls(
+            **mutations,
+            name = os.path.abspath(motif_file),
+        )
 
 
     @classmethod
@@ -289,24 +306,24 @@ class MotifSample(Sample):
             fournuc_counts = Counter()
             N_counts=0
             # sandra fixed: for fragment input we don't need to consider only exonic region. so DON'T use bed12_region.segments()
-            chrom = bed12_region.chromosome
-            start = bed12_region.start
-            end = bed12_region.end
-            # for chrom, start, end in bed12_region:
+            #chrom = bed12_region.chromosome
+            #start = bed12_region.start
+            #end = bed12_region.end
+            
+            for chrom, start, end in bed12_region.segments():
+                window_sequence = fasta_object[chrom][max(0, start-1) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
 
-            window_sequence = fasta_object[chrom][max(start-1,0) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
-
-            for fournuc in rolling(window_sequence):
-                if positive_file:
-                    if not 'N' in fournuc:
-                        fournuc_counts[fournuc]+=1
-  
+                for fournuc in rolling(window_sequence):
+                    if positive_file:
+                        if not 'N' in fournuc:
+                            fournuc_counts[fournuc]+=1
+    
+                        else:
+                            N_counts+=1
                     else:
-                        N_counts+=1
-                else:
-                    pass
+                        pass
 
-            pseudocount = N_counts/(4**4)
+                pseudocount = N_counts/(4**4)
 
             return [
                 [fournuc_counts[context]+pseudocount for context in CONTEXTS]

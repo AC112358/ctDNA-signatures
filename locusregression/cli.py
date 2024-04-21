@@ -13,9 +13,9 @@ logging.basicConfig(level=logging.INFO)
 logger.setLevel(logging.INFO)
 import pickle
 import logging
+from pandas import concat
 import warnings
 from matplotlib.pyplot import savefig
-from .explanation.explanation import explain
 from functools import partial
 from joblib import Parallel, delayed
 import joblib
@@ -570,6 +570,32 @@ empirical_mutrate_parser.add_argument('--output', '-o', type = argparse.FileType
 empirical_mutrate_parser.set_defaults(func = empirical_mutation_rate)
 
 
+def corpus_write_features_bedgraph(*,corpus,output):
+
+    with _get_regions_filename(corpus) as regions_file:
+        corpus_object = stream_corpus(corpus)
+        
+        features = corpus_object.get_features_df()
+        cardinality_features = corpus_object.get_cardinality_features_df()
+        features = concat([features, cardinality_features], axis = 1)
+        del cardinality_features
+        
+        bed12_matrix_to_bedgraph(
+            normalize_to_windowlength = False,
+            regions_file = regions_file,
+            matrix = features.values,
+            feature_names = features.columns,
+            output = output,
+        )
+write_features_bedgraph_parser = subparsers.add_parser('corpus-write-features-bedgraph',
+    help = 'Write features in a corpus to a bedgraph file.'
+)
+write_features_bedgraph_parser.add_argument('corpus', type = file_exists)
+write_features_bedgraph_parser.add_argument('--output', '-o', type = argparse.FileType('w'),
+                                            default = sys.stdout)
+write_features_bedgraph_parser.set_defaults(func = corpus_write_features_bedgraph)
+
+
 
 tune_sub = subparsers.add_parser('study-create', 
     help = 'Tune number of signatures for LocusRegression model on a pre-compiled corpus using the'
@@ -926,7 +952,8 @@ def get_mutation_rate_wrapper(*, model, corpus, output):
         # Remove the effect for each context and direction by summing over 0,1 axes
 
         logger.info('Calculating marginal mutation rates ...')
-        mr = np.exp(model.get_log_marginal_mutation_rate(corpus)).sum((0,1))
+        mr = np.exp(model.get_log_marginal_mutation_rate(corpus))\
+                .sum((0,1)) * corpus.num_mutations
 
         logger.info('Writing mutation rates to bedgraph ...')
         bed12_matrix_to_bedgraph(

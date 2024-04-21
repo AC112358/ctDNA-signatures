@@ -30,7 +30,11 @@ class DummyCorpus:
         self.shared_correlates = corpus.shared_correlates
         self.shared_exposures = corpus.shared_exposures
         self.exposures = corpus.exposures
+        self.name = corpus.name
         self.features = corpus.features
+        self.feature_names = corpus.feature_names
+        self.locus_dim = corpus.locus_dim
+        self.observation_class = corpus.observation_class
 
 
 class ModelState:
@@ -131,10 +135,15 @@ class ModelState:
             self._tau = np.ones((n_components, cardinality_features_dim))\
                             .astype(dtype, copy=False)
             
-            X_tau_combinations = list(product(
-                *[[-1,0,1] for _ in range(self.cardinality_features_dim)], 
-                list(range(self.n_distributions))
+            strand_combinations = list(product(
+                *[[-1,0,1] for _ in range(self.cardinality_features_dim)],
             ))
+
+            X_tau_combinations = [
+                _strand + _intercept
+                for _strand in strand_combinations
+                for _intercept in map(tuple, np.eye(self.n_distributions, dtype=int))
+            ]
 
             self._tau_combinations_map = dict(zip(X_tau_combinations, range(len(X_tau_combinations))))
 
@@ -274,7 +283,7 @@ class ModelState:
         
         # add a column for the corpus intercept
         X = np.hstack([
-            X, self._get_label_idx_vector(corpus_states, 2*n_bins)[:,None]
+            X, self._get_onehot_column(corpus_states, 2*n_bins).toarray()
         ])
 
         indices = np.array([self._tau_combinations_map[tuple(row)] for row in X])

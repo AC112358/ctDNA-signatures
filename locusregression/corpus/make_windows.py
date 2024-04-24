@@ -132,7 +132,7 @@ def _get_endpoints(allowed_chroms, *bedfiles):
     )
 
 
-def _endpoints_to_regions(endpoints, min_windowsize = 3):
+def _endpoints_to_regions(endpoints, min_windowsize = 4): # change default min_windowsize 3 to 4
 
     active_features = Counter()
     feature_combination_ids = dict()
@@ -217,7 +217,7 @@ def make_windows(
 
         logger.info(f'Removing blacklist regions ...')
         subract_process = subprocess.Popen(
-            ['bedtools', 'intersect', '-a', pre_blacklist_file.name, '-b', blacklist_file, '-v'],
+            ['bedtools', 'subtract', '-a', pre_blacklist_file.name, '-b', blacklist_file],
             stdout=subprocess.PIPE,
             universal_newlines=True,
             bufsize=10000,

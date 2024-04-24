@@ -5,6 +5,7 @@ import h5py as h5
 import logging
 from .sample import SampleLoader, InMemorySamples
 from .sbs.observation_config import SBSSample
+from .motif.observation_config import MotifSample
 from pandas import DataFrame
 from tqdm import trange
 logger = logging.getLogger('Corpus')
@@ -112,6 +113,8 @@ class Corpus(CorpusMixin):
     def _get_observation_class(cls, classname):
         if classname.lower() == 'sbs':
             return SBSSample
+        elif classname.lower() == 'fragment-motif':
+            return MotifSample
         else:
             raise ValueError(f'Unknown corpus type {classname}')
 

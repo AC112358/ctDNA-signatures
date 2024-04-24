@@ -90,12 +90,13 @@ def _get_z_posterior(log_p_ml_z,*,
 
 
 
-def get_posterior_sample(*,
+def get_sample_posterior(*,
             model_state,
             component_names,
             sample, 
             corpus_state,
-            n_iters = 1000
+            n_iters = 1000,
+            warmup = 300,
     ):
     
     observation_ll = np.log(
@@ -112,6 +113,7 @@ def get_posterior_sample(*,
             alpha = corpus_state.alpha,
             weights = sample.weight,
             n_iters = n_iters,
+            warmup = warmup,
         )
     )
 
@@ -126,7 +128,6 @@ def get_posterior_sample(*,
     })
 
     return DataFrame(df_cols)
-
 
 
 def _annealed_importance_sampling(

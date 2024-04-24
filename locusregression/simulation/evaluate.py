@@ -1,6 +1,34 @@
 import numpy as np
 from scipy.spatial.distance import cdist
 
+def posterior_divergence(
+    model_state, sample, corpus_state, n_iters = 1000, warmup = 300
+):
+    
+    from ..model import get_sample_posterior
+    
+    def cross_entropy_loss(posterior_df):
+
+        q = np.exp( posterior_df[posterior_df.columns[2:]] ).values[
+            np.arange(len(posterior_df)),
+            posterior_df.POS.values,
+        ]
+
+        return -np.mean(np.log(q))
+
+    
+    z_posterior = get_sample_posterior(
+        model_state=model_state,
+        sample=sample,
+        corpus_state=corpus_state,
+        n_iters = n_iters,
+        warmup = warmup,
+    )
+
+    return cross_entropy_loss(z_posterior)
+
+
+
 def signature_cosine_distance(model, simulation_parameters):
     
     sigs = np.vstack([

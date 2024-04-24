@@ -1,6 +1,6 @@
 import numpy as np
 from ..corpus.sbs.observation_config import SBSSample, CONTEXT_IDX, MUTATIONS_IDX
-from ..corpus.corpus import Corpus, InMemorySamples
+from ..corpus import BED12Record, Corpus, InMemorySamples
 import json
 import os
 import tqdm
@@ -99,14 +99,9 @@ class SimulatedCorpus:
         assert trinucleotide_priors.shape == (num_states, len(CONTEXT_IDX))
 
         #assert isinstance(pi_prior, (int, float))
-
-        shared_exposures = True
         if exposures is None:
             exposures = np.ones((n_cells, n_loci))
         else:
-            #shared_exposures = False
-            #assert exposures.shape == (n_cells, n_loci)
-            shared_exposures = True
             exposures = np.ones((1, n_loci))
 
         randomstate = np.random.RandomState(seed)
@@ -178,7 +173,7 @@ class SimulatedCorpus:
                     for k, signal in enumerate(signals)
                 }
         
-        card_map = ['-','nan','+']
+        card_map = ['-','.','+']
         feature_dict['cardinality'] = {
             'type' : 'cardinality',
             'values' : np.array([card_map[c] for c in cardinality_states]),
@@ -190,8 +185,11 @@ class SimulatedCorpus:
                 name = corpus_name,
                 samples = InMemorySamples(samples),
                 context_frequencies = context_frequencies,
-                shared_exposures = shared_exposures,
-                features = feature_dict
+                features = feature_dict,
+                regions = [
+                    BED12Record(1, 0, 1000, str(i), 0, '+', 0, 1000, '0,0,0', 1, [1000], [0])
+                    for i in range(n_loci)
+                ]
         )
 
         generative_parameters = {
@@ -294,7 +292,7 @@ class SimulatedCorpus:
         if randomstate is None:
             randomstate = np.random.RandomState(seed)
         
-        loci, contexts, mutations, cardinalities = [],[],[],[]
+        loci=[]; contexts=[]; mutations=[]; cardinalities=[]; z=[]
         # KxDxCxL --> KxL
         p_l = psi_matrix.sum(axis = (1,2))
 
@@ -319,6 +317,7 @@ class SimulatedCorpus:
             contexts.append(context)
             mutations.append(mutation)
             cardinalities.append(cardinality)
+            z.append(sig)
 
 
         elements = dict(
@@ -327,10 +326,9 @@ class SimulatedCorpus:
             locus=np.array(loci), 
             weight=np.ones_like(loci).astype(float),
             cardinality=np.array(cardinalities),
-            pos = np.array(loci),
+            pos = np.array(z),
             chrom = np.array(['chr1']*len(loci)),
             attribute = np.zeros_like(loci),
-            exposures = exposures,
         )
 
         for k, v in elements.items():
@@ -377,7 +375,7 @@ class SimulatedCorpus:
 
         generate_sample_fn = partial(
             SimulatedCorpus.simulate_sample,
-            omega=model.model_state.omega[use_signatures],
+            omega=model.model_state._rho[use_signatures],
             exposures=exposures,
             psi_matrix=psi_matrix,
         )
@@ -397,6 +395,6 @@ class SimulatedCorpus:
                 name = corpus.name,
                 samples = InMemorySamples(samples),
                 context_frequencies = corpus.context_frequencies,
-                shared_exposures = corpus.shared_exposures,
-                features = corpus.features
+                features = corpus.features,
+                regions = corpus.regions
             )

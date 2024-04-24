@@ -17,7 +17,6 @@ class GBTRegressor(LocusRegressor):
                  max_leaf_nodes = 31,
                  min_samples_leaf = 30,
                  max_features = 1.,
-                 l2_regularization=1,
                  n_iter_no_change=2,
                  use_groups=True,
                  signature_reg = 0.,
@@ -29,7 +28,6 @@ class GBTRegressor(LocusRegressor):
         self.max_depth = max_depth
         self.use_groups = use_groups
         self.max_trees_per_iter = max_trees_per_iter
-        self.l2_regularization=l2_regularization
         self.n_iter_no_change=n_iter_no_change
         self.max_leaf_nodes = max_leaf_nodes
         self.min_samples_leaf = min_samples_leaf

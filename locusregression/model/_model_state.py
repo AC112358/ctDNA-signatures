@@ -14,9 +14,9 @@ import logging
 logger = logging.getLogger(' LocusRegressor')
 
 
-def _get_linear_model(*args, **kw):
+def _get_linear_model(*args, l2_regularization=1., **kw):
     return PoissonRegressor(
-        alpha = 0, 
+        alpha = l2_regularization, 
         solver = 'newton-cholesky',
         warm_start = True,
         fit_intercept = False,
@@ -59,6 +59,7 @@ class ModelState:
                 mutation_dim,
                 attribute_dim,
                 dtype,
+                l2_regularization = 1.,
                 **kw,
             ):
         
@@ -102,6 +103,7 @@ class ModelState:
 
         self.rate_models = [
             get_model_fn(
+                l2_regularization = l2_regularization,
                 design_matrix = design_matrix, 
                 features = X,
                 categorical_features = self.feature_transformer.list_categorical_features(),

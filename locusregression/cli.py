@@ -2,7 +2,7 @@ from ._cli_utils import *
 from .corpus import *
 from .corpus.sbs.mutation_preprocessing import get_marginal_mutation_rate, get_mutation_clusters, transfer_annotations_to_vcf
 from .model import load_model, logger
-from .model._importance_sampling import get_posterior_sample
+from .model._importance_sampling import get_sample_posterior
 from .tuning import run_trial, create_study, load_study
 from .simulation import SimulatedCorpus, coef_l1_distance, signature_cosine_distance
 import argparse
@@ -733,6 +733,7 @@ retrain_sub.set_defaults(func = retrain_best)
 def train_model(
         locus_subsample = 0.125,
         batch_size = 128,
+        l2_regularization = 1.,
         time_limit = None,
         tau = 16,
         kappa = 0.5,
@@ -773,6 +774,7 @@ def train_model(
         eval_every = eval_every,
         tau = tau,
         kappa = kappa,
+        l2_regularization = l2_regularization,
         empirical_bayes=empirical_bayes,
         begin_prior_updates=begin_prior_updates,
     )
@@ -816,6 +818,8 @@ trainer_optional.add_argument('--fix-signatures','-sigs', nargs='+', type = str,
                                     'Any extra components will be initialized randomly and learned. If no signatures are provided, '
                                     'all are learned de-novo.'
                               )
+trainer_optional.add_argument('--l2-regularization','-l2', type = posfloat, default = 1.,
+                                help = 'L2 regularization strength for the locus effect model.')
 trainer_optional.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
 trainer_optional.add_argument('--tau', type = posint, default = 16)
 trainer_optional.add_argument('--kappa', type = posfloat, default=0.5)
@@ -1042,7 +1046,7 @@ def _write_posterior_annotated_vcf(
                     weight_col=weight_col,
                 )
     
-    posterior_df = get_posterior_sample(
+    posterior_df = get_sample_posterior(
                         sample=sample,
                         model_state=model_state,
                         corpus_state=corpus_state,

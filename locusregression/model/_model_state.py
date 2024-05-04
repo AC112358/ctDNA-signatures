@@ -1,7 +1,7 @@
 
 import numpy as np
 from ._dirichlet_update import update_alpha
-from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS
+from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS, OUT5P_SIGS
 from sklearn.linear_model import PoissonRegressor
 from scipy.special import logsumexp
 from sklearn.preprocessing import OneHotEncoder
@@ -186,6 +186,14 @@ class ModelState:
                 
                 sigmatrix = SimulatedCorpus.cosmic_sig_to_matrix(COSMIC_SIGS[sig])
                 
+            elif 'out' in sig: # to fix out5p signatures, you need to specify 'out' in fix sigs name
+                try:
+                    OUT5P_SIGS[sig]
+                except KeyError:
+                    raise ValueError(f'Unknown signature {sig}')
+
+                sigmatrix = SimulatedCorpus.motif_sig_to_matrix(OUT5P_SIGS[sig])
+                
             else:
                 try:
                     IN5P_SIGS[sig]
@@ -199,6 +207,7 @@ class ModelState:
 
             self._lambda[i] = (sigmatrix.sum(axis = -1) * pseudocounts + 1)/genome_context_frequencies
 
+    
 
     def _fit_corpus_encoder(self, corpus_states):
 

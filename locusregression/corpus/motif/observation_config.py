@@ -176,8 +176,10 @@ class MotifSample(Sample):
             # @sandra: Can get the fragment end motifs from the fasta file - requires no preprocessing of fragment file
             if positive_file and in_corpus:
                 context = fasta_object[chrom][frag_start-1:frag_start+3].seq.upper()
+            elif positive_file:
+                context = fasta_object[chrom][frag_start-5 : frag_start-1][::-1].seq.upper()
             else:
-                raise NotImplementedError("Only positive_file and in_corpus=True is supported")
+                raise NotImplementedError("Only positive_file is supported")
             
             return {
                 'chrom' : chrom,
@@ -203,9 +205,9 @@ class MotifSample(Sample):
         if in_corpus:
             # condition 1: start of region should match or be less than the start of the fragment
             # condition 2: end of region should be greater than the start of the fragment
-            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'" # for in5p, start pos of fragment should be exist in locus
+            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'" # for pos in5p, start pos of fragment should be exist in locus
         else:
-            awk_cmd = f"awk '{{if (($2 <= ${num_cols + 2} && $2 <= ${num_cols + 3})&& (${num_cols + 2} < $3 && ${num_cols + 3} < $3)) print}}'" # for out5p, both start and end pos of fragment should be exist in locus
+            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2}-1 && $3 > ${num_cols + 2}-1) print}}'" # for pos out5p, start-1 pos of fragment should be exist in locus
 
 
         # @Sandra: changes to make mesoscale features work:
@@ -295,7 +297,7 @@ class MotifSample(Sample):
 
 
     @classmethod
-    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1, positive_file=True, in_corpus=True):
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1, in_corpus=True):
     
         def count_fournucs(bed12_region, fasta_object):
 
@@ -311,17 +313,17 @@ class MotifSample(Sample):
             #end = bed12_region.end
             
             for chrom, start, end in bed12_region.segments():
-                window_sequence = fasta_object[chrom][max(0, start-1) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
+                if in_corpus:
+                    window_sequence = fasta_object[chrom][max(0, start-1) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
+                else:
+                     window_sequence = fasta_object[chrom][max(start-1-3,0) : end+3].seq.upper()  # sandra: it becomes -3/+3 since we forced to include start-1 and end+1 in the locus for neg files
 
                 for fournuc in rolling(window_sequence):
-                    if positive_file:
-                        if not 'N' in fournuc:
-                            fournuc_counts[fournuc]+=1
-    
-                        else:
-                            N_counts+=1
+                    if not 'N' in fournuc:
+                        fournuc_counts[fournuc]+=1
+
                     else:
-                        pass
+                        N_counts+=1
 
                 pseudocount = N_counts/(4**4)
 

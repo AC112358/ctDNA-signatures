@@ -23,6 +23,7 @@ import numpy as np
 import tempfile
 from contextlib import contextmanager
 import time
+import ast
 
 from optuna.exceptions import ExperimentalWarning
 warnings.filterwarnings("ignore", category=ExperimentalWarning)
@@ -106,15 +107,15 @@ make_windows_parser.add_argument('--output','-o', type = argparse.FileType('w'),
 make_windows_parser.set_defaults(func = make_windows_wrapper)
 
 
-def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file):
+def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file, in_corpus=True):
 
     regions = read_windows(regions_file)
 
     SampleClass = Corpus._get_observation_class(dtype)
-
     context_frequencies = SampleClass.get_context_frequencies(
         window_set=regions,
         fasta_file=fasta_file,
+        in_corpus=in_corpus,
     )
 
     create_corpus(
@@ -131,6 +132,7 @@ corpus_init_parser.add_argument('--corpus-name','-n', type = str, required = Tru
 corpus_init_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
 corpus_init_parser.add_argument('--regions-file','-r', type = file_exists, required = True)
 corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif','fragment-length','indel',])
+corpus_init_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 corpus_init_parser.set_defaults(func = create_corpus_wrapper)
 
 
@@ -749,14 +751,20 @@ def train_model(
         empirical_bayes = True,
         model_type = 'linear',
         begin_prior_updates = 10,
-        fix_signatures = None,*,
+        fix_signatures = None,
+        max_trees_per_iter = None,
+        l2_regularization = None,
+        in_corpus = True,*,
         n_components,
         corpuses,
         output,
+        
+        
     ):
 
     basemodel = get_basemodel(model_type)
-    
+    if model_type=='gbt':
+        model_params={'max_trees_per_iter': max_trees_per_iter, 'l2_regularization': l2_regularization}
     model = basemodel(
         fix_signatures=fix_signatures,
         locus_subsample = locus_subsample,
@@ -766,7 +774,7 @@ def train_model(
         num_epochs = num_epochs, 
         difference_tol = difference_tol,
         estep_iterations = estep_iterations,
-        quiet = not verbose,
+        quiet = not verbose, **model_params,
         bound_tol = bound_tol,
         n_components = n_components,
         n_jobs= n_jobs,
@@ -781,7 +789,7 @@ def train_model(
     logging.basicConfig(level=logging.INFO)
     logger.setLevel(logging.INFO)
 
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
     
     model.fit(dataset)
     
@@ -831,6 +839,9 @@ trainer_optional.add_argument('--bound-tol', '-tol', type = posfloat, default=1e
     help = 'Early stop criterion, stop training if objective score does not increase by this much after one epoch.')
 trainer_optional.add_argument('--verbose','-v',action = 'store_true', default = False,)
 trainer_optional.add_argument('--n-jobs', '-j', type = posint, default=1)
+trainer_optional.add_argument('--max-trees-per-iter', type = posint, default=25)
+trainer_optional.add_argument('--l2-regularization', type = posfloat, default=1.)
+trainer_optional.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify train model for in5p or out5p motifs (by default it will be trained for out5p motifs).')
 trainer_sub.set_defaults(func = train_model)
 
 

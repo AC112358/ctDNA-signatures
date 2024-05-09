@@ -280,7 +280,8 @@ class SBSSample(Sample):
                     vcf_file, regions_file, fasta_file,
                     chr_prefix = '', 
                     weight_col = None, 
-                    mutation_rate_file=None
+                    mutation_rate_file=None,
+                    in_corpus=None,
                 ):
 
 

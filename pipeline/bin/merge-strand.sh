@@ -9,4 +9,6 @@ regions=$2
 bed=$3
 
 set -e
-bedtools merge -i $bed -s -c 6 -o distinct > $out
+bedtools merge -i $bed -s -c 6 -o distinct | sort -k1,1 -k2,2n \
+    | bedtools merge -i - -c 4 -o distinct | grep -v "," \
+    | sort -k1,1 -k2,2n > $out

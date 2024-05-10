@@ -11,7 +11,7 @@ wildcard_constraints:
 validate(config, 'config.schema.yaml')
 
 CORPUS_NAME=f"corpus.{config['corpus_name']}.h5"
-REGIONS_NAME=f"regions.{config['corpus_name']}.bed"
+REGIONS_NAME=f"{config['corpus_name']}/regions.{config['corpus_name']}.bed"
 FEATURE_TYPE_PARAMS = {
     'bigwig' : ['normalization', 'extend', 'group'],
     'bedgraph' : ['normalization', 'extend', 'group'],
@@ -30,7 +30,7 @@ def get_download_filename(feature_name, idx):
     feature_config = config['features'][feature_name]
     url=feature_config['url'][idx]
     if urlparse(url).scheme in ('http', 'https',):
-        return  f'downloads/{feature_name}.{idx}.out'
+        return  f'{config["corpus_name"]}/downloads/{feature_name}.{idx}.out'
     else:
         return url
 
@@ -43,21 +43,21 @@ def get_ingestion_input_filename(feature_name):
     
     is_url = urlparse(url[0]).scheme in ('http', 'https',)
     if needs_processing:
-        return f'processed/{feature_name}.out'
+        return f'{config["corpus_name"]}/processed/{feature_name}.out'
     elif is_url:
-        return f'downloads/{feature_name}.0.out'
+        return f'{config["corpus_name"]}/downloads/{feature_name}.0.out'
     else:
-        return url
+        return url[0]
 
 rule all:
     input:
-        [f".added_features/{feature_name}.txt" for feature_name in config['features'].keys()] + \
-        [f".added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
+        [f"{config['corpus_name']}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys()] + \
+        [f"{config['corpus_name']}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
 
 
 rule download_resource:
     output:
-        temp("downloads/{feature_name}.{idx}.out")
+        temp(config['corpus_name'] + "/downloads/{feature_name}.{idx}.out")
     params:
         url=lambda w : get_feature_config(w)['url'][int(w.idx)]
     resources:
@@ -69,13 +69,17 @@ rule download_resource:
         wget -O {output} {params.url}
         """
 
+
+def get_features_for_making_windows(wilcards):
+    return [
+        get_ingestion_input_filename(feature_name) 
+        for feature_name, feature_config in config['features'].items()
+        if feature_config['type'] in ('categorical', 'cardinality') and feature_config['affects_windows']
+    ]
+
 rule get_regions:
     input:
-        categorical_features=lambda w : [
-            get_ingestion_input_filename(feature_name) 
-            for feature_name, feature_config in config['features'].items()
-            if feature_config['type'] in ('categorical', 'cardinality') and feature_config['affects_windows']
-            ],
+        categorical_features=get_features_for_making_windows,
         chromsizes=config['chromsizes'],
         blacklist=config['blacklist']
     output:
@@ -83,9 +87,10 @@ rule get_regions:
     params:
         window_size=config['window_size'],
     resources:
-        mem_mb=5000,
+        mem_mb=10000,
         runtime=30
     threads: 1
+    conda: "locusregression"
     shell:
         """
         locusregression get-regions \
@@ -118,13 +123,14 @@ rule process_resource:
     input:
         get_process_input
     output:
-        temp("processed/{feature_name}.out")
+        temp(config['corpus_name'] + "/processed/{feature_name}.out")
     params:
         processing_fn=lambda w : get_feature_config(w)['processing_fn'],
     resources:
         mem_mb=5000,
         runtime=30,
     threads: 1
+    conda: "locusregression"
     shell:
         """
         {params.processing_fn} {output} {input}
@@ -134,15 +140,17 @@ rule create_corpus:
     input:
         regions=rules.get_regions.output.regions,
     output:
-        corpus=ancient(CORPUS_NAME)
+        corpus=CORPUS_NAME
     params:
         fasta=config['fasta'],
         dtype=config['dtype'],
         corpus_name=config['corpus_name'],
+        extra_params=''
     resources:
         mem_mb=3000,
         runtime=60,
     threads: 1
+    conda: "locusregression"
     shell:
         """
         locusregression corpus-create \
@@ -150,7 +158,8 @@ rule create_corpus:
             --corpus-name {params.corpus_name} \
             --fasta-file {params.fasta} \
             --dtype {params.dtype} \
-            --regions-file {input.regions}
+            --regions-file {input.regions} \
+            {params.extra_params}
         """
 
 def get_ingestion_params(wildcards):
@@ -163,10 +172,10 @@ def get_ingestion_params(wildcards):
 
 rule ingest_feature:
     input:
-        corpus=CORPUS_NAME,
+        corpus=ancient(CORPUS_NAME),
         file=lambda w : get_ingestion_input_filename(w.feature_name),
     output:
-        touch(".added_features/{feature_name}.txt")
+        touch(config['corpus_name'] + "/.added_features/{feature_name}.txt")
     params:
         extra_params=get_ingestion_params,
         type=lambda w : get_feature_config(w)['type'],
@@ -174,6 +183,7 @@ rule ingest_feature:
         mem_mb=5000,
         runtime=15,
     threads: 1
+    conda: "locusregression"
     shell:
         """
         locusregression corpus-ingest-{params.type} \
@@ -196,6 +206,7 @@ rule get_background_mutrate:
         mem_mb=2000,
         runtime=30,
     threads: 1
+    conda: "locusregression"
     shell:
         """
         locusregression preprocess-estimate-mutrate \
@@ -213,12 +224,12 @@ def get_sample_group(wildcards, num_per_group=50):
 
 rule ingest_sample:
     input:
-        corpus=CORPUS_NAME,
+        corpus=ancient(CORPUS_NAME),
         sample_file=get_sample_filename,
         fasta=config['fasta'],
         background_mutation_rate=lambda w : CORPUS_NAME + '.mutrate.bedgraph',
     output:
-        temp(".added_samples/{sample_name}.txt")
+        temp(config['corpus_name'] + ".added_samples/{sample_name}.txt")
     params:
         weight_col=config['weight_col'],
     group:
@@ -227,6 +238,7 @@ rule ingest_sample:
         mem_mb=1000,
         runtime=5,
     threads: 1
+    conda: "locusregression"
     shell:
         """
         locusregression corpus-ingest-sample \

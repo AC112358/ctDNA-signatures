@@ -27,8 +27,7 @@ properties:
     description: Data type of the features
     enum:
     - sbs
-    - indel
-    - snv
+    - fragment-motif
     type: string
     default: sbs
   samples:

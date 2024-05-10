@@ -825,7 +825,7 @@ trainer_optional.add_argument('--fix-signatures','-sigs', nargs='+', type = str,
 trainer_optional.add_argument('--l2-regularization','-l2', type = posfloat, default = 1.,
                                 help = 'L2 regularization strength for the locus effect model.')
 trainer_optional.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
-trainer_optional.add_argument('--tau', type = posint, default = 16)
+trainer_optional.add_argument('--tau', type = posint, default = 1)
 trainer_optional.add_argument('--kappa', type = posfloat, default=0.5)
 trainer_optional.add_argument('--eval-every', '-eval', type = posint, default = 10,
     help = 'Evaluate the bound after every this many epochs')
@@ -1113,7 +1113,6 @@ assign_components_parser.add_argument('model', type = file_exists)
 assign_components_parser.add_argument('--vcf-files','-vcfs', nargs='+', type = file_exists, required=True)
 assign_components_parser.add_argument('--corpus','-d', type = file_exists, required=True)
 assign_components_parser.add_argument('--output-prefix','-prefix', type = str, required=True)
-assign_components_parser.add_argument('--exposure-file','-e', type = file_exists, default=None)
 assign_components_parser.add_argument('--chr-prefix', type = str, default = '')
 assign_components_parser.add_argument('--weight-col','-w', type = str, default=None)
 assign_components_parser.add_argument('--n-jobs','-j',type=posint, default=1)

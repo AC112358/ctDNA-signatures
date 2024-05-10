@@ -31,7 +31,7 @@ def create_study(
     num_epochs = 500,
     fix_signatures = None,
     use_pruner = False,
-    locus_subsample_rates = [0.125, 0.05, 0.025, 0.01], # change here sandra it was [0.125, 0.25, 0.5, 1.]
+    locus_subsample_rates = [0.125, 0.25, 0.5, 1.], #[0.125, 0.05, 0.025, 0.01], # change here sandra it was 
     storage = None,
     seed = 0,*,
     corpuses,

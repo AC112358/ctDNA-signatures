@@ -54,10 +54,5 @@ class GBTRegressor(LocusRegressor):
     @classmethod
     def sample_params(cls, trial):
         return {
-            'max_trees_per_iter' : trial.suggest_int('max_trees_per_iter', 3, 50),
             'l2_regularization': trial.suggest_categorical('l2_regularization', [0.,1e-2,1e-1, 1, 10, 100, 1000]),
-            #'max_leaf_nodes' : trial.suggest_int('max_leaf_nodes', 10, 50),
-            #'min_samples_leaf' : trial.suggest_int('min_samples_leaf', 5, 50),
-            #'max_features' : trial.suggest_categorical('max_features', [0.25, 0.5, 0.75, 1.0]),
-            #'use_groups' : trial.suggest_categorical('use_groups', [True, False]),
         }

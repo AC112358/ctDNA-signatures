@@ -27,4 +27,6 @@ bedtools subtract \
     -a $promoter_regions \
     -b $promoter_regions \
     -A -f 0.25 -r -e -S -sorted \
-    | bedtools merge -i - -s -c 6 -o distinct > $out
+    | bedtools merge -i - -s -c 6 -o distinct \
+    | sort -k1,1 -k2,2n \
+    > $out

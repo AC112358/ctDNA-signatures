@@ -241,14 +241,15 @@ class Corpus(CorpusMixin):
         return self
     
 
-    def get_empirical_mutation_rate(self, use_weight=True):
+    def get_empirical_mutation_rate(self, use_weight=True, include_subclonal=True):
 
         # returns the ln mutation rate for each locus in the first sample
-        mutation_rate = self.samples[0].get_empirical_mutation_rate(self.locus_dim, use_weight = use_weight)
+        kw=dict(use_weight = use_weight, include_subclonal=include_subclonal)
+        mutation_rate = self.samples[0].get_empirical_mutation_rate(self.locus_dim, **kw)
 
         # loop through the rest of the samples and add the mutation rate using logsumexp
         for i in trange(1, len(self), desc = 'Piling up mutations', ncols=100):
-            mutation_rate = mutation_rate + self.samples[i].get_empirical_mutation_rate(self.locus_dim, use_weight = use_weight)
+            mutation_rate = mutation_rate + self.samples[i].get_empirical_mutation_rate(self.locus_dim, **kw)
         
         return mutation_rate
     

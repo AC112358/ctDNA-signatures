@@ -108,7 +108,9 @@ class Sample:
         )
         
     
-    def get_empirical_mutation_rate(self, n_loci, use_weight = True):
+    def get_empirical_mutation_rate(self, n_loci, 
+                                    use_weight = True, 
+                                    include_subclonal=True):
         """
         Calculates the empirical mutation rate.
 
@@ -122,7 +124,8 @@ class Sample:
         mutations = np.zeros((self.N_CARDINALITY, self.N_CONTEXTS, n_loci), dtype = float if use_weight else np.uint32)
 
         for mutation in self:
-            mutations[mutation['cardinality'], mutation['context'], mutation['locus']] += mutation['weight'] if use_weight else 1
+            if include_subclonal or mutation['weight'] >= 0.5:
+                mutations[mutation['cardinality'], mutation['context'], mutation['locus']] += mutation['weight'] if use_weight else 1
         
         return mutations
 

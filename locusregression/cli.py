@@ -546,11 +546,11 @@ split_parser.add_argument('--seed', '-s', type = posint, default=0)
 split_parser.set_defaults(func = split_corpus)
 
 
-def empirical_mutation_rate(*,corpus, output):
+def empirical_mutation_rate(*,corpus, output, no_weight=True, no_subclonal=False):
 
     with _get_regions_filename(corpus) as regions_file:
         mutation_rate = stream_corpus(corpus)\
-                        .get_empirical_mutation_rate()\
+                        .get_empirical_mutation_rate(use_weight=not no_weight, include_subclonal=not no_subclonal)\
                         .sum((0,1))
         
         bed12_matrix_to_bedgraph(
@@ -567,6 +567,10 @@ empirical_mutrate_parser = subparsers.add_parser('corpus-empirical-mutrate',
 empirical_mutrate_parser.add_argument('corpus', type = file_exists)
 empirical_mutrate_parser.add_argument('--output', '-o', type = argparse.FileType('w'), 
                                         default = sys.stdout)
+empirical_mutrate_parser.add_argument('--no-weight', '-nw', action = 'store_true', default=False,
+                                        help = 'Do not use mutation weights to calculate mutation rate.')
+empirical_mutrate_parser.add_argument('--no-subclonal', '-ns', action = 'store_true', default=False,
+                                        help = 'Do not include subclonal mutations in mutation rate calculation.')
 empirical_mutrate_parser.set_defaults(func = empirical_mutation_rate)
 
 

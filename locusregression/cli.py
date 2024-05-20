@@ -448,6 +448,7 @@ def ingest_sample(mutation_rate_bedgraph=None,
                   weight_col=None,
                   chr_prefix='',
                   in_corpus=True,
+                  sample_weight=1.,
                   *,corpus, sample_file, fasta_file
                 ):
     
@@ -467,7 +468,8 @@ def ingest_sample(mutation_rate_bedgraph=None,
             chr_prefix = chr_prefix,
             weight_col = weight_col,
             mutation_rate_file = mutation_rate_bedgraph,
-            in_corpus = in_corpus
+            in_corpus = in_corpus,
+            sample_weight=sample_weight,
         )
     
     sample.name = sample_name
@@ -484,6 +486,7 @@ ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_e
 ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
 ingest_sample_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
+ingest_sample_parser.add_argument('--sample-weight','-sw', type = posfloat, default=1., help = 'Weight to assign to sample.')
 ingest_sample_parser.set_defaults(func = ingest_sample)
 
 

@@ -124,7 +124,7 @@ class Sample:
         mutations = np.zeros((self.N_CARDINALITY, self.N_CONTEXTS, n_loci), dtype = float if use_weight else np.uint32)
 
         for mutation in self:
-            if include_subclonal or mutation['weight'] >= 0.5:
+            if include_subclonal or mutation['weight'] >= 0.35:
                 mutations[mutation['cardinality'], mutation['context'], mutation['locus']] += mutation['weight'] if use_weight else 1
         
         return mutations
@@ -150,7 +150,21 @@ class Sample:
             k : getattr(self, k)[i]
             for k in self.mutation_attrs if hasattr(self, k)
         }
+    
+    @classmethod
+    def featurize_mutations(cls, 
+                    vcf_file, regions_file, fasta_file,
+                    chr_prefix = '', 
+                    weight_col = None, 
+                    mutation_rate_file=None,
+                    sample_weight = 1.,
+                    **kw,
+                ):
+        raise NotImplementedError()
 
+    @classmethod
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1):
+        raise NotImplementedError()
 
 
 

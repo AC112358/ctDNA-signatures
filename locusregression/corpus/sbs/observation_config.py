@@ -281,6 +281,7 @@ class SBSSample(Sample):
                     chr_prefix = '', 
                     weight_col = None, 
                     mutation_rate_file=None,
+                    sample_weight=1.,
                     **kw,
                 ):
 
@@ -374,6 +375,8 @@ class SBSSample(Sample):
 
             for k, v in mutations.items():
                 mutations[k] = np.array(v).astype(SBSSample.type_map[k])
+
+            mutations['weight']*=sample_weight
 
             if n_cluster_mutations > 0:
                 total_mutations = n_cluster_mutations + len(mutations[k])

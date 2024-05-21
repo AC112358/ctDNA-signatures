@@ -1124,6 +1124,43 @@ assign_components_parser.add_argument('--fasta-file','-fa', type = file_exists, 
 assign_components_parser.set_defaults(func = assign_components_wrapper)
 
 
+def get_crossentropy_loss(*,model, corpus, output, no_locuseffects=True):
+
+    from .simulation.evaluate import posterior_divergence
+    from tqdm import tqdm
+
+    corpus_state = load_corpusstate_cache(model, corpus)
+
+    if no_locuseffects:
+        corpus_state._cardinality_effects = np.zeros_like(corpus_state.cardinality_effects_)
+        corpus_state._theta = np.zeros_like(corpus_state.theta_)
+
+    corpus = stream_corpus(corpus)
+    model = load_model(model)
+
+    #write header
+    print('sample_name','true_process','prediction_logit', file=output, sep=',')
+
+    for sample in tqdm(corpus, desc='Calculating posterior divergences', 
+                       unit='samples', total=len(corpus)):
+        
+        for true_process, logit in posterior_divergence(
+                model_state=model.model_state, 
+                sample=sample, 
+                corpus_state=corpus_state,
+                component_names=model.component_names,
+                n_iters=3000,
+            ):
+            print(sample.name, true_process, logit, file=output, sep=',')
+
+crossentropy_parser = subparsers.add_parser('model-get-crossentropy',
+    help = 'Get the crossentropy loss of the model on the corpus.')
+crossentropy_parser.add_argument('model', type = file_exists)
+crossentropy_parser.add_argument('--corpus','-d', type = file_exists, required=True)
+crossentropy_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
+crossentropy_parser.add_argument('--no-locuseffects', action = 'store_true', default=False)
+crossentropy_parser.set_defaults(func = get_crossentropy_loss)
+
 
 def run_simulation(*,config, prefix):
     

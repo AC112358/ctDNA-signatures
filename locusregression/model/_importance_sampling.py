@@ -66,7 +66,8 @@ def _get_z_posterior(log_p_ml_z,*,
                      weights,
                      n_iters = 1000,
                      warmup = 300,
-                     randomstate = None
+                     randomstate = None,
+                     quiet = False,
                     ):
     
     gibbs_sampler, z_tild = _get_gibbs_sample_function(
@@ -79,12 +80,15 @@ def _get_z_posterior(log_p_ml_z,*,
     K, N = log_p_ml_z.shape
     z_posterior = np.zeros_like(log_p_ml_z)
 
-    for step in tqdm.tqdm(range(1,warmup+n_iters+1), ncols=100, desc = 'Sampling mutation assignments'):
+    ranger=range(1,warmup+n_iters+1)
+    for step in ranger if quiet else tqdm.tqdm(range, ncols=100, desc = 'Sampling mutation assignments'):
 
         z_tild = gibbs_sampler(z_tild, temperature= min(1, step/warmup))
 
         if step > warmup:
             z_posterior[z_tild, np.arange(N)] += 1
+
+    z_posterior+=alpha[:,np.newaxis]
 
     return z_posterior / np.sum(z_posterior, axis = 0, keepdims = True)
 
@@ -97,6 +101,7 @@ def get_sample_posterior(*,
             corpus_state,
             n_iters = 1000,
             warmup = 300,
+            quiet = False,
     ):
     
     observation_ll = np.log(
@@ -106,7 +111,8 @@ def get_sample_posterior(*,
             corpus_state=corpus_state
         )
     )
-
+    
+    np.seterr(divide='ignore')  # Ignore divide by zero error
     z_posterior = np.log(
         _get_z_posterior(
             observation_ll,
@@ -114,8 +120,11 @@ def get_sample_posterior(*,
             weights = sample.weight,
             n_iters = n_iters,
             warmup = warmup,
+            quiet=quiet
         )
     )
+    np.seterr(divide='warn')  # Reset divide by zero error to default behavior
+    z_posterior = np.nan_to_num(z_posterior, nan=float('-inf'))
 
     df_cols = {
         'CHROM' : sample.chrom.astype(str),

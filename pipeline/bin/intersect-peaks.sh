@@ -1,13 +1,15 @@
 #!/bin/bash
 
-if [ $# -lt 4 ]; then
-    echo -e "Invalid number of arguments. Expected at least 4 arguments."
-    exit 1
+if [ $# -lt 5 ]; then
+    echo -e "Invalid number of arguments. Expected at least 5 arguments."
+    echo -e "usage: intersect-peaks.sh <feature_name> <threshold> <out> <regions> <bedfiles>"
+    exit 2
 fi
 feature_name=$1
-out=$2
-regions=$3
-bedfiles=${@:4}
+threshold=$2
+out=$3
+regions=$4
+bedfiles=${@:5}
 
 set -e
 tmpdir=$(mktemp -d)

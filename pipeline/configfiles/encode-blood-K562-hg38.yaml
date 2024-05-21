@@ -1,0 +1,108 @@
+fasta: /Users/allen/genomes/hg38/hg38.fa
+chromsizes: chromsizes.txt
+blacklist: /Users/allen/genomes/hg19/hg19.blacklist.bed
+weight_col: None
+window_size: 1000
+corpus_name: encode-blood-K562-hg38
+dtype: fragment-motif
+
+# source:https://www.encodeproject.org/experiments/ENCSR545DKY/
+transcription: https://www.encodeproject.org/files/ENCFF603FRV/@@download/ENCFF603FRV.tsv
+
+features:
+  gene_strand:
+    type: cardinality
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "merge-strand.sh"
+    column: 4
+  promoter_strand:
+    type: cardinality
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "get-promoters.sh 2000"
+    column: 4
+  transcription:
+    type: vector
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "map-values.sh"
+  transcription_windowcutter:
+    type: categorical
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn : "cut_transcription () { cut -f1-3,5 $3 | sort -k1,1 -k2,2n |  > $1; }; cut_transcription"
+    skip: true
+  TSS_region_windowcutter:
+    type: categorical
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "get-tss-region.sh 2000"
+    skip : true
+  TSS_usage:
+    type: vector
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "get-tss-usage.sh 2000"
+  TSS_distance:
+    type: distance
+    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    group: all
+    processing_fn: "get-tss-region.sh 2000"
+  CTCF_binding:
+    type: categorical
+    url:
+      - https://www.encodeproject.org/files/ENCFF843VHC/@@download/ENCFF843VHC.bed.gz
+      - https://www.encodeproject.org/files/ENCFF396BZQ/@@download/ENCFF396BZQ.bed.gz
+      - https://www.encodeproject.org/files/ENCFF519CXF/@@download/ENCFF519CXF.bed.gz
+    processing_fn: "intersect-peaks.sh CTCF 2"
+  CTCF_distance:
+    type: distance
+    url:
+      - https://www.encodeproject.org/files/ENCFF843VHC/@@download/ENCFF843VHC.bed.gz
+      - https://www.encodeproject.org/files/ENCFF396BZQ/@@download/ENCFF396BZQ.bed.gz
+      - https://www.encodeproject.org/files/ENCFF519CXF/@@download/ENCFF519CXF.bed.gz
+    processing_fn: "intersect-peaks.sh CTCF 2"
+  H3K27ac:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF779QTH/@@download/ENCFF779QTH.bigWig]
+    group: all
+    norm: power
+  H3K4me1:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF834SEY/@@download/ENCFF834SEY.bigWig]
+    group: all
+    norm: power
+  H3K36me3:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF954JHK/@@download/ENCFF954JHK.bigWig]
+    group: all
+    norm: power
+  H3K4me3:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF525ZRM/@@download/ENCFF525ZRM.bigWig]
+    group: all
+    norm: power
+  H3K9me3:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF812HRW/@@download/ENCFF812HRW.bigWig]
+    group: all
+    norm: power
+  H3K27me3:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF914VFE/@@download/ENCFF914VFE.bigWig]
+    group: all
+    norm: power
+  RNApol_signal:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF178AKL/@@download/ENCFF178AKL.bigWig]
+    group: all
+    norm: power
+  DNase:
+    type: bigwig
+    url: [https://www.encodeproject.org/files/ENCFF972GVB/@@download/ENCFF972GVB.bigWig]
+    group: all
+    norm: power
+    
+samples: {}
+  

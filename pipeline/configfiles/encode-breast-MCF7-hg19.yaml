@@ -1,0 +1,127 @@
+
+
+fasta: /Users/allen/genomes/hg19/hg19.fa
+chromsizes: chromsizes.txt
+blacklist: /Users/allen/genomes/hg19/hg19.blacklist.bed
+weight_col: TCF
+chr_prefix: chr
+window_size: 10000
+corpus_name: encode-WT-breast-hg19
+dtype: sbs
+
+# what's going on with weights*****
+
+# use already trained model, label mutations (already have)
+# epigenome features vs. mutation rates from split samples (based on hormone derived BC)
+# add cluster dependence to the pipeline. 
+# TNBC and HR cell line features*
+# CCLE mutations and matching vs. not matching epigenetic features
+# choose good 
+
+# source: https://www.encodeproject.org/experiments/ENCSR000CTO/
+transcriptome_quant: https://www.encodeproject.org/files/ENCFF238KCL/@@download/ENCFF238KCL.tsv
+
+features:
+  gene_strand:
+    type: cardinality
+    url: [hg19.breast-epithelium.gene-expression.bed]
+    group: all
+    processing_fn: "merge-strand.sh"
+    column: 4
+  promoter_strand:
+    type: cardinality
+    url: [hg19.breast-epithelium.gene-expression.bed]
+    group: all
+    processing_fn: "get-promoters.sh 2000"
+    column: 4
+  transcription:
+    type: vector
+    url: [hg19.breast-epithelium.gene-expression.bed]
+    group: all
+    processing_fn: "map-values.sh"
+  ctcf_binding:
+    type: categorical
+    sources: 
+      - https://www.encodeproject.org/experiments/ENCSR000DWH/
+      - https://www.encodeproject.org/experiments/ENCSR000DMR/
+      - https://www.encodeproject.org/experiments/ENCSR000DMO/
+    url:
+      - https://www.encodeproject.org/files/ENCFF414FWV/@@download/ENCFF414FWV.bed.gz
+      - https://www.encodeproject.org/files/ENCFF176YNV/@@download/ENCFF176YNV.bed.gz
+      - https://www.encodeproject.org/files/ENCFF372SHI/@@download/ENCFF372SHI.bed.gz
+    group: all
+    processing_fn: "intersect-peaks.sh CTCF"
+  ctcf_distance:
+    type: distance
+    sources: 
+      - https://www.encodeproject.org/experiments/ENCSR000DWH/
+      - https://www.encodeproject.org/experiments/ENCSR000DMR/
+      - https://www.encodeproject.org/experiments/ENCSR000DMO/
+    url:
+      - https://www.encodeproject.org/files/ENCFF414FWV/@@download/ENCFF414FWV.bed.gz
+      - https://www.encodeproject.org/files/ENCFF176YNV/@@download/ENCFF176YNV.bed.gz
+      - https://www.encodeproject.org/files/ENCFF372SHI/@@download/ENCFF372SHI.bed.gz
+    group: all
+    processing_fn: "intersect-peaks.sh CTCF"
+    norm: quantile
+  H3K27ac:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR752UOD/
+    url: [https://www.encodeproject.org/files/ENCFF051GGA/@@download/ENCFF051GGA.bigWig]
+    group: all
+  H3K27me3:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR761DLU/
+    url: [https://www.encodeproject.org/files/ENCFF952HXB/@@download/ENCFF952HXB.bigWig]
+    group: all
+  H3K36me3:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR610IYQ/
+    url: [https://www.encodeproject.org/files/ENCFF232HHP/@@download/ENCFF232HHP.bigWig]
+    group: all
+  H3K4me3:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR985MIB/
+    url: [https://www.encodeproject.org/files/ENCFF312VBM/@@download/ENCFF312VBM.bigWig]
+    group: all
+  H3K9me3:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR999WHE/
+    url: [https://www.encodeproject.org/files/ENCFF877NQZ/@@download/ENCFF877NQZ.bigWig]
+    group: all
+  H3K4me1:
+    type: bigwig
+    source: https://www.encodeproject.org/experiments/ENCSR493NBY/
+    url: [https://www.encodeproject.org/files/ENCFF407HFV/@@download/ENCFF407HFV.bigWig]
+    group: all
+  replication_timing:
+    type: bigwig
+    source: https://www.encodeproject.org/search/?type=Experiment&assay_slims=Replication+timing&assay_title=Repli-seq&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&biosample_ontology.classification=cell+line&biosample_ontology.term_name=MCF-7&status=released
+    url: 
+      - https://www.encodeproject.org/files/ENCFF001GTD/@@download/ENCFF001GTD.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTF/@@download/ENCFF001GTF.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTH/@@download/ENCFF001GTH.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTK/@@download/ENCFF001GTK.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GSV/@@download/ENCFF001GSV.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GSX/@@download/ENCFF001GSX.bigWig
+    processing_fn: average-bigwigs.sh
+    group: all
+  replication_strand:
+    type: cardality
+    source: https://www.encodeproject.org/search/?type=Experiment&assay_slims=Replication+timing&assay_title=Repli-seq&replicates.library.biosample.donor.organism.scientific_name=Homo+sapiens&biosample_ontology.classification=cell+line&biosample_ontology.term_name=MCF-7&status=released
+    url: 
+      - https://www.encodeproject.org/files/ENCFF001GTD/@@download/ENCFF001GTD.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTF/@@download/ENCFF001GTF.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTH/@@download/ENCFF001GTH.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GTK/@@download/ENCFF001GTK.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GSV/@@download/ENCFF001GSV.bigWig
+      - https://www.encodeproject.org/files/ENCFF001GSX/@@download/ENCFF001GSX.bigWig
+    processing_fn: get-replication-strand.sh
+    group: all
+  insulation_score:
+    type: bigwig
+    url:
+    group: all
+
+samples: {}
+  

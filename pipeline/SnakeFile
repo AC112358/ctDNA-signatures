@@ -34,6 +34,7 @@ def get_download_filename(feature_name, idx):
     else:
         return url
 
+
 def get_ingestion_input_filename(feature_name):
     feature_config = config['features'][feature_name]
     url=feature_config['url']
@@ -49,9 +50,10 @@ def get_ingestion_input_filename(feature_name):
     else:
         return url[0]
 
+
 rule all:
     input:
-        [f"{config['corpus_name']}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys()] + \
+        [f"{config['corpus_name']}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() if not config['features'][feature_name]['skip']] + \
         [f"{config['corpus_name']}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
 
 
@@ -74,7 +76,8 @@ def get_features_for_making_windows(wilcards):
     return [
         get_ingestion_input_filename(feature_name) 
         for feature_name, feature_config in config['features'].items()
-        if feature_config['type'] in ('categorical', 'cardinality') and feature_config['affects_windows']
+        if ('affects_windows' in feature_config and feature_config['affects_windows']) \
+            or (feature_config['type'] in ('categorical', 'cardinality') and not 'affects_windows' in feature_config)
     ]
 
 rule get_regions:
@@ -100,6 +103,7 @@ rule get_regions:
             --categorical-features {input.categorical_features} \
             --output {output}
         """    
+
 
 rule make_fake_windows:
     output:

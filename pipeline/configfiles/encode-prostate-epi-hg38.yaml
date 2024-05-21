@@ -1,0 +1,32 @@
+fasta: /Users/allen/genomes/hg38/hg38.fa
+chromsizes: chromsizes.txt
+blacklist: /Users/allen/genomes/hg19/hg19.blacklist.bed
+weight_col: None
+window_size: 1000
+corpus_name: encode-prostate-epi-hg38
+dtype: motif
+
+# source:
+transcription: pass
+
+features:
+  gene_strand:
+    type: cardinality
+    url: [genes.bed]
+    group: genomic
+    processing_fn: "merge-strand.sh"
+    column: 4
+  promoter_strand:
+    type: cardinality
+    url: [genes.bed]
+    group: genomic
+    processing_fn: "get-promoters.sh 2000"
+    column: 4
+  transcription:
+    type: vector
+    url: [genes.bed]
+    group: gene
+    processing_fn: "map-values.sh"
+
+samples: {}
+  

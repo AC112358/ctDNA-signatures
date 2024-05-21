@@ -48,7 +48,10 @@ properties:
           affects_windows:
             description: Whether the feature affects windows, only applicable for categorical and cardinality features
             type: boolean
-            default: true
+          skip:
+            description: Whether to skip the feature
+            type: boolean
+            default: false
           group:
             description: Group to which the feature belongs
             type: string

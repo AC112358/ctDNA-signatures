@@ -42,7 +42,7 @@ with open(os.path.join(os.path.dirname(__file__), 'cosmic.json'),'r') as f:
     COSMIC_SIGS = json.load(f)
 
 # IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'MSK_allreads_W_in5p_NMF_10_20_17.csv'), index_col=0) # without normalization
-IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'MSK_allreads_norm_W_in5p_norm_NMF_10_20_18_converted.csv'), index_col=0) # re-unnormalized
+IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_in5p_catalog_in_v2.csv'), index_col=0) # re-unnormalized
 IN5P_SIGS = IN5P_SIGS.to_dict()
 OUT5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out_sparse_selected.csv'), index_col=0) # re-unnormalized
 OUT5P_SIGS = OUT5P_SIGS.to_dict()

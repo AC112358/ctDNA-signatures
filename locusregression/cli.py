@@ -846,9 +846,9 @@ trainer_sub.set_defaults(func = train_model)
 
 
 
-def score(subset_by_loci=False,*,model, corpuses):
+def score(subset_by_loci=False,in_corpus = True,*,model, corpuses):
 
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model = load_model(model)
 
@@ -860,12 +860,13 @@ score_parser.add_argument('model', type = file_exists)
 score_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
 score_parser.add_argument('--subset-by-loci', action = 'store_true', default=False)
+score_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 score_parser.set_defaults(func = score)
 
 
-def predict(*,model, corpuses, output):
+def predict(in_corpus = True,*,model, corpuses, output):
 
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model = load_model(model)
 
@@ -877,6 +878,7 @@ predict_sub = subparsers.add_parser('model-predict-exposures', help = 'Predict e
 predict_sub.add_argument('model', type = file_exists)
 predict_sub.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
                          help = 'Path to compiled corpus file/files.')
+predict_sub.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 predict_sub.add_argument('--output','-o', type =  valid_path, required=True)
 predict_sub.set_defaults(func = predict)
 
@@ -913,10 +915,10 @@ list_components_parser.add_argument('model', type = file_exists)
 list_components_parser.set_defaults(func = list_components)
 
 
-def get_mutation_rate_r2(*, model, corpuses):
+def get_mutation_rate_r2(in_corpus = True,*, model, corpuses):
 
     model = load_model(model)
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
     
     print(
         model.get_mutation_rate_r2(dataset),
@@ -928,14 +930,15 @@ mutrate_r2_parser = subparsers.add_parser('model-mutation-rate-r2',
 mutrate_r2_parser.add_argument('model', type = file_exists)
 mutrate_r2_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
+mutrate_r2_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 mutrate_r2_parser.set_defaults(func = get_mutation_rate_r2)
 
 
-def calc_locus_explanations(*,model,corpuses,components,n_jobs=1, subsample=10000):
+def calc_locus_explanations(in_corpus = True,*,model,corpuses,components,n_jobs=1, subsample=10000):
 
     model_path = model
     model = load_model(model)
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model.calc_locus_explanations(dataset,*components,n_jobs=n_jobs, subsample=subsample)
     model.save(model_path)

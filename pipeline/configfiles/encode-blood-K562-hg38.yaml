@@ -1,54 +1,61 @@
-fasta: /Users/allen/genomes/hg38/hg38.fa
-chromsizes: chromsizes.txt
-blacklist: /Users/allen/genomes/hg19/hg19.blacklist.bed
+chromsizes: /n/data1/hms/dbmi/park/sandra/ctDNA_loci/fragment/yoona_test/MSK/hg38_autosomes.txt
+blacklist : /n/data1/hms/dbmi/park/sandra/ctDNA_loci/fragment/yoona_test/MSK/merged_hg38-blacklist.v2_unpanel.sorted.bed
+fasta : /n/data1/hms/dbmi/park/SOFTWARE/REFERENCE/hg38/cgap_matches/Homo_sapiens_assembly38.fa
 weight_col: None
 window_size: 1000
-corpus_name: encode-blood-K562-hg38
+corpus_name: encode-blood-K562.hg38.fragments-in
 dtype: fragment-motif
+#extra_params: "--in-corpus"
+
+#
+# query-gtf -i MANE.GRCh38.v1.3.ensembl_genomic.gff --header --is-gff -type transcript -attr gene_id -f "{chrom}\t{start}\t{end}\t{attributes[gene_name]}\t{attributes[gene_id]}\t{strand}\n" > hg38.curated-genes.bed
+# get_gene_features.py -quant ENCFF556ISR.tsv -genes hg38.curated-genes.bed > encode-blood-K562-geneinfo.bed
+#
 
 # source:https://www.encodeproject.org/experiments/ENCSR545DKY/
-transcription: https://www.encodeproject.org/files/ENCFF603FRV/@@download/ENCFF603FRV.tsv
+transcription: https://www.encodeproject.org/files/ENCFF556ISR/@@download/ENCFF556ISR.tsv
 
 features:
   gene_strand:
     type: cardinality
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "merge-strand.sh"
     column: 4
   promoter_strand:
     type: cardinality
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "get-promoters.sh 2000"
     column: 4
   transcription:
     type: vector
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "map-values.sh"
   transcription_windowcutter:
     type: categorical
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn : "cut_transcription () { cut -f1-3,5 $3 | sort -k1,1 -k2,2n |  > $1; }; cut_transcription"
     skip: true
   TSS_region_windowcutter:
     type: categorical
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "get-tss-region.sh 2000"
     skip : true
   TSS_usage:
     type: vector
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "get-tss-usage.sh 2000"
   TSS_distance:
     type: distance
-    url: [/Users/allen/projects/locusregression/signaturemodels/pipeline/data/encode-blood-K562-geneinfo.bed]
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/locusregression/corpus-construction/data/encode-blood-K562-geneinfo.bed]
     group: all
     processing_fn: "get-tss-region.sh 2000"
+    normalization: quantile
   CTCF_binding:
     type: categorical
     url:
@@ -63,6 +70,7 @@ features:
       - https://www.encodeproject.org/files/ENCFF396BZQ/@@download/ENCFF396BZQ.bed.gz
       - https://www.encodeproject.org/files/ENCFF519CXF/@@download/ENCFF519CXF.bed.gz
     processing_fn: "intersect-peaks.sh CTCF 2"
+    normalization: quantile
   H3K27ac:
     type: bigwig
     url: [https://www.encodeproject.org/files/ENCFF779QTH/@@download/ENCFF779QTH.bigWig]
@@ -103,6 +111,16 @@ features:
     url: [https://www.encodeproject.org/files/ENCFF972GVB/@@download/ENCFF972GVB.bigWig]
     group: all
     norm: power
-    
+  Insulation:
+    type: bedgraph
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/pcawg_analysis/prostate/ctcf_files/AML_insulation.sorted.bedgraph]
+    group: all
+    normalization: standardize
+  Compartment_eig:
+    type: bedgraph
+    url: [/n/data1/hms/dbmi/park/ctDNA_loci_project/pcawg_analysis/prostate/ctcf_files/AML_eigenvector.sorted.bedgraph]
+    group: all
+    normalization: standardize
+
 samples: {}
   

@@ -149,7 +149,7 @@ rule create_corpus:
         fasta=config['fasta'],
         dtype=config['dtype'],
         corpus_name=config['corpus_name'],
-        extra_params=''
+        extra_params=config['extra_params'],
     resources:
         mem_mb=3000,
         runtime=60,
@@ -168,11 +168,15 @@ rule create_corpus:
 
 def get_ingestion_params(wildcards):
     feature_config = get_feature_config(wildcards)
-    return ' '.join([
+    paramstr = ' '.join([
         f"--{k.replace('_', '-')} {v}"
         for k, v in feature_config.items()
         if k in FEATURE_TYPE_PARAMS[feature_config['type']]
     ])
+    if feature_config['type']=='bedgraph':
+        paramstr+=' --genome-file ' + config['chromsizes']
+    return paramstr
+
 
 rule ingest_feature:
     input:

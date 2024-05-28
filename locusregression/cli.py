@@ -665,6 +665,7 @@ trial_parser = subparsers.add_parser('study-run-trial', help='Run a single trial
 trial_parser.add_argument('study-name',type = str)
 trial_parser.add_argument('--storage','-s', type = str, default=None)
 trial_parser.add_argument('--iters','-i', type = posint, default=1)
+trial_parser.add_argument('--n-jobs', '-j', type = posint, default=1)
 trial_parser.set_defaults(func = wraps_run_trial)
 
 
@@ -738,6 +739,7 @@ retrain_sub.add_argument('--num-epochs','-epochs', type = int, default = None,
 retrain_sub.set_defaults(func = retrain_best)
 
 def train_model(
+        train_size=None,
         locus_subsample = 0.125,
         batch_size = 128,
         l2_regularization = 1.,
@@ -790,8 +792,19 @@ def train_model(
     logger.setLevel(logging.INFO)
 
     dataset = load_dataset(corpuses)
+
+    if not train_size is None:
+        logger.info('Splitting train and test set ...')
+        train, test = train_test_split(
+            dataset,
+            train_size=train_size, 
+            seed=seed,
+            by_locus=True,
+        )
+    else:
+        train=dataset; test=None
     
-    model.fit(dataset)
+    model.fit(train, test_corpus=test, subset_by_loci=True)
     
     model.save(output)
 
@@ -811,6 +824,7 @@ trainer_required .add_argument('--output','-o', type = valid_path, required=True
 
 trainer_optional = trainer_sub.add_argument_group('Optional arguments')
 
+trainer_optional.add_argument('--train-size', '-ts', type=posfloat, default=None)
 trainer_optional.add_argument('--model-type','-model', choices=['linear','gbt'], default='linear')
 trainer_optional.add_argument('--locus-subsample','-sub', type = posfloat, default = None,
     help = 'Whether to use locus subsampling to speed up training via stochastic variational inference.')
@@ -1130,13 +1144,18 @@ def get_crossentropy_loss(*,model, corpus, output, no_locuseffects=True):
     from tqdm import tqdm
 
     corpus_state = load_corpusstate_cache(model, corpus)
-
-    if no_locuseffects:
-        corpus_state._cardinality_effects = np.zeros_like(corpus_state.cardinality_effects_)
-        corpus_state._theta = np.zeros_like(corpus_state.theta_)
-
     corpus = stream_corpus(corpus)
     model = load_model(model)
+
+    if no_locuseffects:
+        # remove everything that was learned by the model except for the signatures
+        corpus_state._cardinality_effects = np.zeros_like(corpus_state.cardinality_effects_)
+        corpus_state._theta = np.zeros_like(corpus_state.theta_)
+        average_exposure = corpus_state.context_frequencies.sum(axis=-1, keepdims=True)
+        average_exposure /= average_exposure.sum()
+        windowlen = corpus_state.context_frequencies.sum(axis=(0,1), keepdims=True)
+        corpus_state.corpus.context_frequencies = average_exposure * windowlen
+        corpus_state._log_denom = corpus_state._get_log_denom(model.model_state)
 
     #write header
     print('sample_name','true_process','prediction_logit', file=output, sep=',')
@@ -1145,6 +1164,7 @@ def get_crossentropy_loss(*,model, corpus, output, no_locuseffects=True):
                        unit='samples', total=len(corpus)):
         
         for true_process, logit in posterior_divergence(
+                model=model,
                 model_state=model.model_state, 
                 sample=sample, 
                 corpus_state=corpus_state,

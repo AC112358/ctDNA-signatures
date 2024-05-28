@@ -4,6 +4,10 @@ properties:
   fasta:
     description: Path to the reference genome fasta file
     type: string
+  extra_params:
+    description: Params to pass for corpus construction
+    type: string
+    default: ""
   chromsizes:
     description: Path to the chromosome sizes file
     type: string

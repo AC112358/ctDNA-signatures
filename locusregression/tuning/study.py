@@ -117,7 +117,7 @@ def load_study(study_name, storage = None, with_corpus = True):
 
 
 
-def run_trial(*,study_name, iters, storage = None):
+def run_trial(*,study_name, iters, storage = None, n_jobs=1):
 
     study, dataset, attrs = load_study(study_name, storage)
 
@@ -137,6 +137,7 @@ def run_trial(*,study_name, iters, storage = None):
         locus_subsample_rates = attrs['locus_subsample_rates'],
         model_type = attrs['model_type'],
         num_epochs = attrs['num_epochs'],
+        n_jobs=n_jobs,
         subset_by_loci=True,
         train = train,
         test = test,

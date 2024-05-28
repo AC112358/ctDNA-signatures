@@ -3,6 +3,7 @@ from scipy.spatial.distance import cdist
 from pandas import DataFrame
 
 def posterior_divergence(*,
+        model,
         model_state, 
         sample, 
         corpus_state, 
@@ -24,6 +25,7 @@ def posterior_divergence(*,
         return log_q
     
     z_posterior = get_sample_posterior(
+        model=model,
         model_state=model_state,
         component_names=component_names,
         sample=sample,

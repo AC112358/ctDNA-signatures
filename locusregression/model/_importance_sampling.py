@@ -3,7 +3,7 @@ import tqdm
 from functools import partial
 from scipy.special import logsumexp
 from ._dirichlet_update import log_dirichlet_expectation
-from .model import _get_observation_likelihood
+from .model import _get_observation_likelihood, log_dirichlet_expectation
 from scipy.stats import dirichlet_multinomial
 from pandas import DataFrame
 
@@ -95,6 +95,7 @@ def _get_z_posterior(log_p_ml_z,*,
 
 
 def get_sample_posterior(*,
+            model,
             model_state,
             component_names,
             sample, 
@@ -102,6 +103,7 @@ def get_sample_posterior(*,
             n_iters = 1000,
             warmup = 300,
             quiet = False,
+            use_vi = True,
     ):
     
     observation_ll = np.log(
@@ -112,19 +114,27 @@ def get_sample_posterior(*,
         )
     )
     
-    np.seterr(divide='ignore')  # Ignore divide by zero error
-    z_posterior = np.log(
-        _get_z_posterior(
-            observation_ll,
-            alpha = corpus_state.alpha,
-            weights = sample.weight,
-            n_iters = n_iters,
-            warmup = warmup,
-            quiet=quiet
+    if not use_vi:
+        np.seterr(divide='ignore')  # Ignore divide by zero error
+        z_posterior = np.log(
+            _get_z_posterior(
+                observation_ll,
+                alpha = corpus_state.alpha,
+                weights = sample.weight,
+                n_iters = n_iters,
+                warmup = warmup,
+                quiet=quiet
+            )
         )
-    )
-    np.seterr(divide='warn')  # Reset divide by zero error to default behavior
-    z_posterior = np.nan_to_num(z_posterior, nan=float('-inf'))
+        np.seterr(divide='warn')  # Reset divide by zero error to default behavior
+        z_posterior = np.nan_to_num(z_posterior, nan=float('-inf'))
+    else:
+        gamma_hat = model._predict_sample(
+                        sample, corpus_state,
+                    )
+
+        logit = observation_ll + log_dirichlet_expectation(gamma_hat[:,np.newaxis])
+        z_posterior = logit - logsumexp(logit, axis=0, keepdims=True)
 
     df_cols = {
         'CHROM' : sample.chrom.astype(str),

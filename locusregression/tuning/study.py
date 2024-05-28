@@ -31,7 +31,7 @@ def create_study(
     num_epochs = 500,
     fix_signatures = None,
     use_pruner = False,
-    locus_subsample_rates = [0.125, 0.05, 0.025, 0.01], # change here sandra it was [0.125, 0.25, 0.5, 1.]
+    locus_subsample_rates = [0.125, 0.25, 0.5, 1.], #[0.125, 0.05, 0.025, 0.01], # change here sandra it was 
     storage = None,
     seed = 0,
     n_jobs = 1,*,
@@ -120,7 +120,7 @@ def load_study(study_name, storage = None, with_corpus = True):
 
 
 
-def run_trial(*,study_name, iters, storage = None):
+def run_trial(*,study_name, iters, storage = None, n_jobs=1):
 
     study, dataset, attrs = load_study(study_name, storage)
 
@@ -140,6 +140,7 @@ def run_trial(*,study_name, iters, storage = None):
         locus_subsample_rates = attrs['locus_subsample_rates'],
         model_type = attrs['model_type'],
         num_epochs = attrs['num_epochs'],
+        n_jobs=n_jobs,
         subset_by_loci=True,
         train = train,
         test = test,

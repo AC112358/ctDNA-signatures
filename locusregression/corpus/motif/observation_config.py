@@ -140,7 +140,9 @@ class MotifSample(Sample):
                     chr_prefix = '', 
                     weight_col = None, 
                     mutation_rate_file=None,
-                    in_corpus=True
+                    sample_weight=1.,
+                    in_corpus=True,
+                    **kw,
                 ):
 
         def process_line(line, fasta_object, 

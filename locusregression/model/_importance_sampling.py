@@ -3,7 +3,7 @@ import tqdm
 from functools import partial
 from scipy.special import logsumexp
 from ._dirichlet_update import log_dirichlet_expectation
-from .model import _get_observation_likelihood
+from .model import _get_observation_likelihood, log_dirichlet_expectation
 from scipy.stats import dirichlet_multinomial
 from pandas import DataFrame
 
@@ -66,7 +66,8 @@ def _get_z_posterior(log_p_ml_z,*,
                      weights,
                      n_iters = 1000,
                      warmup = 300,
-                     randomstate = None
+                     randomstate = None,
+                     quiet = False,
                     ):
     
     gibbs_sampler, z_tild = _get_gibbs_sample_function(
@@ -79,23 +80,30 @@ def _get_z_posterior(log_p_ml_z,*,
     K, N = log_p_ml_z.shape
     z_posterior = np.zeros_like(log_p_ml_z)
 
-    for step in tqdm.tqdm(range(1,warmup+n_iters+1), ncols=100, desc = 'Sampling mutation assignments'):
+    ranger=range(1,warmup+n_iters+1)
+    for step in ranger if quiet else tqdm.tqdm(range, ncols=100, desc = 'Sampling mutation assignments'):
 
         z_tild = gibbs_sampler(z_tild, temperature= min(1, step/warmup))
 
         if step > warmup:
             z_posterior[z_tild, np.arange(N)] += 1
 
+    z_posterior+=alpha[:,np.newaxis]
+
     return z_posterior / np.sum(z_posterior, axis = 0, keepdims = True)
 
 
 
-def get_posterior_sample(*,
+def get_sample_posterior(*,
+            model,
             model_state,
             component_names,
             sample, 
             corpus_state,
-            n_iters = 1000
+            n_iters = 1000,
+            warmup = 300,
+            quiet = False,
+            use_vi = True,
     ):
     
     observation_ll = np.log(
@@ -105,15 +113,28 @@ def get_posterior_sample(*,
             corpus_state=corpus_state
         )
     )
-
-    z_posterior = np.log(
-        _get_z_posterior(
-            observation_ll,
-            alpha = corpus_state.alpha,
-            weights = sample.weight,
-            n_iters = n_iters,
+    
+    if not use_vi:
+        np.seterr(divide='ignore')  # Ignore divide by zero error
+        z_posterior = np.log(
+            _get_z_posterior(
+                observation_ll,
+                alpha = corpus_state.alpha,
+                weights = sample.weight,
+                n_iters = n_iters,
+                warmup = warmup,
+                quiet=quiet
+            )
         )
-    )
+        np.seterr(divide='warn')  # Reset divide by zero error to default behavior
+        z_posterior = np.nan_to_num(z_posterior, nan=float('-inf'))
+    else:
+        gamma_hat = model._predict_sample(
+                        sample, corpus_state,
+                    )
+
+        logit = observation_ll + log_dirichlet_expectation(gamma_hat[:,np.newaxis])
+        z_posterior = logit - logsumexp(logit, axis=0, keepdims=True)
 
     df_cols = {
         'CHROM' : sample.chrom.astype(str),
@@ -126,7 +147,6 @@ def get_posterior_sample(*,
     })
 
     return DataFrame(df_cols)
-
 
 
 def _annealed_importance_sampling(

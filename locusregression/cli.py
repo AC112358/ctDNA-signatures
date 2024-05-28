@@ -2,7 +2,7 @@ from ._cli_utils import *
 from .corpus import *
 from .corpus.sbs.mutation_preprocessing import get_marginal_mutation_rate, get_mutation_clusters, transfer_annotations_to_vcf
 from .model import load_model, logger
-from .model._importance_sampling import get_posterior_sample
+from .model._importance_sampling import get_sample_posterior
 from .tuning import run_trial, create_study, load_study
 from .simulation import SimulatedCorpus, coef_l1_distance, signature_cosine_distance
 import argparse
@@ -450,6 +450,7 @@ def ingest_sample(mutation_rate_bedgraph=None,
                   weight_col=None,
                   chr_prefix='',
                   in_corpus=True,
+                  sample_weight=1.,
                   *,corpus, sample_file, fasta_file
                 ):
     
@@ -469,7 +470,8 @@ def ingest_sample(mutation_rate_bedgraph=None,
             chr_prefix = chr_prefix,
             weight_col = weight_col,
             mutation_rate_file = mutation_rate_bedgraph,
-            in_corpus = in_corpus
+            in_corpus = in_corpus,
+            sample_weight=sample_weight,
         )
     
     sample.name = sample_name
@@ -486,6 +488,7 @@ ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_e
 ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
 ingest_sample_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
+ingest_sample_parser.add_argument('--sample-weight','-sw', type = posfloat, default=1., help = 'Weight to assign to sample.')
 ingest_sample_parser.set_defaults(func = ingest_sample)
 
 
@@ -548,11 +551,11 @@ split_parser.add_argument('--seed', '-s', type = posint, default=0)
 split_parser.set_defaults(func = split_corpus)
 
 
-def empirical_mutation_rate(*,corpus, output):
+def empirical_mutation_rate(*,corpus, output, no_weight=True, no_subclonal=False):
 
     with _get_regions_filename(corpus) as regions_file:
         mutation_rate = stream_corpus(corpus)\
-                        .get_empirical_mutation_rate()\
+                        .get_empirical_mutation_rate(use_weight=not no_weight, include_subclonal=not no_subclonal)\
                         .sum((0,1))
         
         bed12_matrix_to_bedgraph(
@@ -569,6 +572,10 @@ empirical_mutrate_parser = subparsers.add_parser('corpus-empirical-mutrate',
 empirical_mutrate_parser.add_argument('corpus', type = file_exists)
 empirical_mutrate_parser.add_argument('--output', '-o', type = argparse.FileType('w'), 
                                         default = sys.stdout)
+empirical_mutrate_parser.add_argument('--no-weight', '-nw', action = 'store_true', default=False,
+                                        help = 'Do not use mutation weights to calculate mutation rate.')
+empirical_mutrate_parser.add_argument('--no-subclonal', '-ns', action = 'store_true', default=False,
+                                        help = 'Do not include subclonal mutations in mutation rate calculation.')
 empirical_mutrate_parser.set_defaults(func = empirical_mutation_rate)
 
 
@@ -661,6 +668,7 @@ trial_parser = subparsers.add_parser('study-run-trial', help='Run a single trial
 trial_parser.add_argument('study-name',type = str)
 trial_parser.add_argument('--storage','-s', type = str, default=None)
 trial_parser.add_argument('--iters','-i', type = posint, default=1)
+trial_parser.add_argument('--n-jobs', '-j', type = posint, default=1)
 trial_parser.set_defaults(func = wraps_run_trial)
 
 
@@ -734,8 +742,10 @@ retrain_sub.add_argument('--num-epochs','-epochs', type = int, default = None,
 retrain_sub.set_defaults(func = retrain_best)
 
 def train_model(
+        train_size=None,
         locus_subsample = 0.125,
         batch_size = 128,
+        l2_regularization = 1.,
         time_limit = None,
         tau = 16,
         kappa = 0.5,
@@ -765,6 +775,7 @@ def train_model(
     basemodel = get_basemodel(model_type)
     if model_type=='gbt':
         model_params={'max_trees_per_iter': max_trees_per_iter, 'l2_regularization': l2_regularization}
+        
     model = basemodel(
         fix_signatures=fix_signatures,
         locus_subsample = locus_subsample,
@@ -782,6 +793,7 @@ def train_model(
         eval_every = eval_every,
         tau = tau,
         kappa = kappa,
+        l2_regularization = l2_regularization,
         empirical_bayes=empirical_bayes,
         begin_prior_updates=begin_prior_updates,
     )
@@ -789,9 +801,21 @@ def train_model(
     logging.basicConfig(level=logging.INFO)
     logger.setLevel(logging.INFO)
 
+
     dataset = load_dataset(corpuses, in_corpus)
+
+    if not train_size is None:
+        logger.info('Splitting train and test set ...')
+        train, test = train_test_split(
+            dataset,
+            train_size=train_size, 
+            seed=seed,
+            by_locus=True,
+        )
+    else:
+        train=dataset; test=None
     
-    model.fit(dataset)
+    model.fit(train, test_corpus=test, subset_by_loci=True)
     
     model.save(output)
 
@@ -811,6 +835,7 @@ trainer_required .add_argument('--output','-o', type = valid_path, required=True
 
 trainer_optional = trainer_sub.add_argument_group('Optional arguments')
 
+trainer_optional.add_argument('--train-size', '-ts', type=posfloat, default=None)
 trainer_optional.add_argument('--model-type','-model', choices=['linear','gbt'], default='linear')
 trainer_optional.add_argument('--locus-subsample','-sub', type = posfloat, default = None,
     help = 'Whether to use locus subsampling to speed up training via stochastic variational inference.')
@@ -825,8 +850,10 @@ trainer_optional.add_argument('--fix-signatures','-sigs', nargs='+', type = str,
                                     'Any extra components will be initialized randomly and learned. If no signatures are provided, '
                                     'all are learned de-novo.'
                               )
+trainer_optional.add_argument('--l2-regularization','-l2', type = posfloat, default = 1.,
+                                help = 'L2 regularization strength for the locus effect model.')
 trainer_optional.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
-trainer_optional.add_argument('--tau', type = posint, default = 16)
+trainer_optional.add_argument('--tau', type = posint, default = 1)
 trainer_optional.add_argument('--kappa', type = posfloat, default=0.5)
 trainer_optional.add_argument('--eval-every', '-eval', type = posint, default = 10,
     help = 'Evaluate the bound after every this many epochs')
@@ -840,7 +867,6 @@ trainer_optional.add_argument('--bound-tol', '-tol', type = posfloat, default=1e
 trainer_optional.add_argument('--verbose','-v',action = 'store_true', default = False,)
 trainer_optional.add_argument('--n-jobs', '-j', type = posint, default=1)
 trainer_optional.add_argument('--max-trees-per-iter', type = posint, default=25)
-trainer_optional.add_argument('--l2-regularization', type = posfloat, default=1.)
 trainer_optional.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify train model for in5p or out5p motifs (by default it will be trained for out5p motifs).')
 trainer_sub.set_defaults(func = train_model)
 
@@ -1057,7 +1083,7 @@ def _write_posterior_annotated_vcf(
                     weight_col=weight_col,
                 )
     
-    posterior_df = get_posterior_sample(
+    posterior_df = get_sample_posterior(
                         sample=sample,
                         model_state=model_state,
                         corpus_state=corpus_state,
@@ -1120,7 +1146,6 @@ assign_components_parser.add_argument('model', type = file_exists)
 assign_components_parser.add_argument('--vcf-files','-vcfs', nargs='+', type = file_exists, required=True)
 assign_components_parser.add_argument('--corpus','-d', type = file_exists, required=True)
 assign_components_parser.add_argument('--output-prefix','-prefix', type = str, required=True)
-assign_components_parser.add_argument('--exposure-file','-e', type = file_exists, default=None)
 assign_components_parser.add_argument('--chr-prefix', type = str, default = '')
 assign_components_parser.add_argument('--weight-col','-w', type = str, default=None)
 assign_components_parser.add_argument('--n-jobs','-j',type=posint, default=1)
@@ -1128,6 +1153,49 @@ assign_components_parser.add_argument('--regions-file','-r', type = file_exists,
 assign_components_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True)
 assign_components_parser.set_defaults(func = assign_components_wrapper)
 
+
+def get_crossentropy_loss(*,model, corpus, output, no_locuseffects=True):
+
+    from .simulation.evaluate import posterior_divergence
+    from tqdm import tqdm
+
+    corpus_state = load_corpusstate_cache(model, corpus)
+    corpus = stream_corpus(corpus)
+    model = load_model(model)
+
+    if no_locuseffects:
+        # remove everything that was learned by the model except for the signatures
+        corpus_state._cardinality_effects = np.zeros_like(corpus_state.cardinality_effects_)
+        corpus_state._theta = np.zeros_like(corpus_state.theta_)
+        average_exposure = corpus_state.context_frequencies.sum(axis=-1, keepdims=True)
+        average_exposure /= average_exposure.sum()
+        windowlen = corpus_state.context_frequencies.sum(axis=(0,1), keepdims=True)
+        corpus_state.corpus.context_frequencies = average_exposure * windowlen
+        corpus_state._log_denom = corpus_state._get_log_denom(model.model_state)
+
+    #write header
+    print('sample_name','true_process','prediction_logit', file=output, sep=',')
+
+    for sample in tqdm(corpus, desc='Calculating posterior divergences', 
+                       unit='samples', total=len(corpus)):
+        
+        for true_process, logit in posterior_divergence(
+                model=model,
+                model_state=model.model_state, 
+                sample=sample, 
+                corpus_state=corpus_state,
+                component_names=model.component_names,
+                n_iters=3000,
+            ):
+            print(sample.name, true_process, logit, file=output, sep=',')
+
+crossentropy_parser = subparsers.add_parser('model-get-crossentropy',
+    help = 'Get the crossentropy loss of the model on the corpus.')
+crossentropy_parser.add_argument('model', type = file_exists)
+crossentropy_parser.add_argument('--corpus','-d', type = file_exists, required=True)
+crossentropy_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
+crossentropy_parser.add_argument('--no-locuseffects', action = 'store_true', default=False)
+crossentropy_parser.set_defaults(func = get_crossentropy_loss)
 
 
 def run_simulation(*,config, prefix):

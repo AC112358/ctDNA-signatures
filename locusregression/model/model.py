@@ -109,7 +109,8 @@ class LocusRegressor:
 
     def __init__(self, 
         n_components = 10,
-        seed = 2, 
+        seed = 2,
+        l2_regularization = 1.,
         dtype = float,
         pi_prior = 1.,
         num_epochs = 300, 
@@ -162,6 +163,7 @@ class LocusRegressor:
         self.batch_size = batch_size
         self.fix_signatures = fix_signatures
         self.begin_prior_updates = begin_prior_updates
+        self.l2_regularization = l2_regularization
 
 
     def save(self, filename):
@@ -365,7 +367,9 @@ class LocusRegressor:
 
 
     def _get_rate_model_parameters(self):
-        return {}
+        return {
+            'l2_regularization': self.l2_regularization,
+        }
     
     @property
     def is_trained(self):

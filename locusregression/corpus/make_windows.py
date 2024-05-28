@@ -148,22 +148,28 @@ def _endpoints_to_regions(endpoints, min_windowsize = 4): # change default min_w
             active_features = Counter()
             prev_chrom = chrom; prev_pos = pos
         elif pos > (prev_pos + min_windowsize) and len(active_features) > 0:
+            
+            is_nested_start = active_features[(track_id, feature)] > 0 and is_start
+            is_nested_end = active_features[(track_id, feature)] > 1 and not is_start
 
-            feature_combination = tuple(sorted(active_features.keys()))
+            if is_nested_start or is_nested_end:
+                '''logger.warning(
+                    f'Nested features detected in file {track_id}, feature {feature} at position {chrom}:{pos}.\n'
+                    'Avoided writing a new window.'
+                )'''
+                pass
+            else:
+                feature_combination = tuple(sorted(active_features.keys()))
 
-            if not feature_combination in feature_combination_ids:
-                feature_combination_ids[feature_combination] = len(feature_combination_ids)
+                if not feature_combination in feature_combination_ids:
+                    feature_combination_ids[feature_combination] = len(feature_combination_ids)
 
-            yield chrom, prev_pos, pos, feature_combination_ids[feature_combination]    
+                yield chrom, prev_pos, pos, feature_combination_ids[feature_combination]
 
         if is_start:
             active_features[(track_id,feature)] += 1
         else:
             if active_features[(track_id,feature)] > 1:
-                logger.warning(
-                    f'Multiple overlapping features of the same type detected in file {track_id}, feature {feature} at position {chrom}:{pos}.\n'
-                    'Make sure to merge the bedfile regions if this is intentional.'
-                )
                 active_features[(track_id,feature)]-=1
             else:
                 active_features.pop((track_id,feature))

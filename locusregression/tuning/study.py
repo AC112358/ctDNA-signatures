@@ -33,7 +33,8 @@ def create_study(
     use_pruner = False,
     locus_subsample_rates = [0.125, 0.25, 0.5, 1.], #[0.125, 0.05, 0.025, 0.01], # change here sandra it was 
     storage = None,
-    seed = 0,*,
+    seed = 0,
+    n_jobs = 1,*,
     corpuses,
     min_components, 
     max_components,
@@ -49,6 +50,7 @@ def create_study(
         pi_prior = pi_prior,
         empirical_bayes = empirical_bayes,
         fix_signatures = fix_signatures,
+        n_jobs = n_jobs
     )
 
     '''if use_pruner:
@@ -85,6 +87,7 @@ def create_study(
     study.set_user_attr('seed', seed)
     study.set_user_attr('train_size', train_size)
     study.set_user_attr('num_epochs', num_epochs)
+    study.set_user_attr('n_jobs', n_jobs)
     
 
 

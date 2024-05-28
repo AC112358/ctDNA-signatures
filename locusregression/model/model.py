@@ -856,7 +856,7 @@ class LocusRegressor:
 
 
     def plot_signature(self, component, ax = None, 
-                       figsize = (5.5,3), 
+                       figsize = (8.5,3), 
                        normalization = 'global', 
                        fontsize=5,
                        show_strand=True,
@@ -936,13 +936,13 @@ class LocusRegressor:
 
         if plot_card:
             n_card_features = len(self.model_state.strand_transformer.feature_names_)
-            gridspec=[5.5, 0.5*n_card_features, 0.35*n_locus_features + 1]
+            gridspec=[8.5, 0.5*n_card_features, 0.35*n_locus_features + 1]
         else:
             n_card_features=0
-            gridspec=[5.5, 0.35*n_locus_features + 1]
+            gridspec=[8.5, 0.35*n_locus_features + 1]
 
         fig, ax = plt.subplots(len(components), 2 + int(plot_card), 
-                               figsize=(5.5 + 0.5*n_card_features + 0.35*n_locus_features + 1, 1.75*len(components)), 
+                               figsize=(8.5 + 0.5*n_card_features + 0.35*n_locus_features + 1, 1.75*len(components)), 
                                sharex='col',
                                gridspec_kw={
                                    'width_ratios': gridspec,
@@ -950,18 +950,14 @@ class LocusRegressor:
                                    'wspace': 0.25,
                                    }
                                )
-        
+        fig.set_dpi(300)
         ax = np.atleast_2d(ax)
 
         for i, comp in enumerate(components):
-            if i < len(components)-1:
-                self.plot_signature(comp, ax=ax[i,0], show_xticks=False)
-            else:
-                 self.plot_signature(comp, ax=ax[i,0])
+            self.plot_signature(comp, ax=ax[i,0], show_xticks=False)
             ax[i,0].set_title('')
             ax[i,0].set_ylabel(comp, fontsize=7)
-            ax[i,0].xaxis.set_ticks_position('none') 
-                
+            ax[i,0].tick_params(axis='x', which='both', length=0)
 
             if self.model_state.fit_cardinality_:
                 self.plot_cardinality_bias(comp, ax=ax[i,1], fontsize=7)
@@ -977,9 +973,6 @@ class LocusRegressor:
                 if plot_card:
                     ax[i,1].tick_params(axis='x', bottom=False)
                 ax[i,-1].tick_params(axis='x', bottom=False)
-
-        return ax
-    
 
     def get_empirical_component_mutation_rate(self, corpus):
         """

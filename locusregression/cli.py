@@ -23,6 +23,7 @@ import numpy as np
 import tempfile
 from contextlib import contextmanager
 import time
+import ast
 
 from optuna.exceptions import ExperimentalWarning
 warnings.filterwarnings("ignore", category=ExperimentalWarning)
@@ -106,15 +107,15 @@ make_windows_parser.add_argument('--output','-o', type = argparse.FileType('w'),
 make_windows_parser.set_defaults(func = make_windows_wrapper)
 
 
-def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file):
+def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file, in_corpus=True):
 
     regions = read_windows(regions_file)
 
     SampleClass = Corpus._get_observation_class(dtype)
-
     context_frequencies = SampleClass.get_context_frequencies(
         window_set=regions,
         fasta_file=fasta_file,
+        in_corpus=in_corpus,
     )
 
     create_corpus(
@@ -131,6 +132,7 @@ corpus_init_parser.add_argument('--corpus-name','-n', type = str, required = Tru
 corpus_init_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
 corpus_init_parser.add_argument('--regions-file','-r', type = file_exists, required = True)
 corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif','fragment-length','indel',])
+corpus_init_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 corpus_init_parser.set_defaults(func = create_corpus_wrapper)
 
 
@@ -653,6 +655,7 @@ model_options.add_argument('--batch-size','-batch', type = posint, default = 128
 model_options.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
 model_options.add_argument('--pi-prior', '-pi', type = posfloat, default = 1.,
     help = 'Dirichlet prior over sample mixture compositions. A value > 1 will give more dense compositions, which <1 finds more sparse compositions.')
+model_options.add_argument('--n-jobs', '-j', type = posint, default=1)
 tune_sub.set_defaults(func = create_study)
 
 
@@ -758,14 +761,21 @@ def train_model(
         empirical_bayes = True,
         model_type = 'linear',
         begin_prior_updates = 10,
-        fix_signatures = None,*,
+        fix_signatures = None,
+        max_trees_per_iter = None,
+        l2_regularization = None,
+        in_corpus = True,*,
         n_components,
         corpuses,
         output,
+        
+        
     ):
 
     basemodel = get_basemodel(model_type)
-    
+    if model_type=='gbt':
+        model_params={'max_trees_per_iter': max_trees_per_iter, 'l2_regularization': l2_regularization}
+        
     model = basemodel(
         fix_signatures=fix_signatures,
         locus_subsample = locus_subsample,
@@ -775,7 +785,7 @@ def train_model(
         num_epochs = num_epochs, 
         difference_tol = difference_tol,
         estep_iterations = estep_iterations,
-        quiet = not verbose,
+        quiet = not verbose, **model_params,
         bound_tol = bound_tol,
         n_components = n_components,
         n_jobs= n_jobs,
@@ -791,7 +801,8 @@ def train_model(
     logging.basicConfig(level=logging.INFO)
     logger.setLevel(logging.INFO)
 
-    dataset = load_dataset(corpuses)
+
+    dataset = load_dataset(corpuses, in_corpus)
 
     if not train_size is None:
         logger.info('Splitting train and test set ...')
@@ -855,13 +866,15 @@ trainer_optional.add_argument('--bound-tol', '-tol', type = posfloat, default=1e
     help = 'Early stop criterion, stop training if objective score does not increase by this much after one epoch.')
 trainer_optional.add_argument('--verbose','-v',action = 'store_true', default = False,)
 trainer_optional.add_argument('--n-jobs', '-j', type = posint, default=1)
+trainer_optional.add_argument('--max-trees-per-iter', type = posint, default=25)
+trainer_optional.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify train model for in5p or out5p motifs (by default it will be trained for out5p motifs).')
 trainer_sub.set_defaults(func = train_model)
 
 
 
-def score(subset_by_loci=False,*,model, corpuses):
+def score(subset_by_loci=False,in_corpus = True,*,model, corpuses):
 
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model = load_model(model)
 
@@ -873,12 +886,13 @@ score_parser.add_argument('model', type = file_exists)
 score_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
 score_parser.add_argument('--subset-by-loci', action = 'store_true', default=False)
+score_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 score_parser.set_defaults(func = score)
 
 
-def predict(*,model, corpuses, output):
+def predict(in_corpus = True,*,model, corpuses, output):
 
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model = load_model(model)
 
@@ -890,6 +904,7 @@ predict_sub = subparsers.add_parser('model-predict-exposures', help = 'Predict e
 predict_sub.add_argument('model', type = file_exists)
 predict_sub.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
                          help = 'Path to compiled corpus file/files.')
+predict_sub.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 predict_sub.add_argument('--output','-o', type =  valid_path, required=True)
 predict_sub.set_defaults(func = predict)
 
@@ -926,10 +941,10 @@ list_components_parser.add_argument('model', type = file_exists)
 list_components_parser.set_defaults(func = list_components)
 
 
-def get_mutation_rate_r2(*, model, corpuses):
+def get_mutation_rate_r2(in_corpus = True,*, model, corpuses):
 
     model = load_model(model)
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
     
     print(
         model.get_mutation_rate_r2(dataset),
@@ -941,14 +956,15 @@ mutrate_r2_parser = subparsers.add_parser('model-mutation-rate-r2',
 mutrate_r2_parser.add_argument('model', type = file_exists)
 mutrate_r2_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
+mutrate_r2_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 mutrate_r2_parser.set_defaults(func = get_mutation_rate_r2)
 
 
-def calc_locus_explanations(*,model,corpuses,components,n_jobs=1, subsample=10000):
+def calc_locus_explanations(in_corpus = True,*,model,corpuses,components,n_jobs=1, subsample=10000):
 
     model_path = model
     model = load_model(model)
-    dataset = load_dataset(corpuses)
+    dataset = load_dataset(corpuses, in_corpus)
 
     model.calc_locus_explanations(dataset,*components,n_jobs=n_jobs, subsample=subsample)
     model.save(model_path)

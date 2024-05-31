@@ -763,7 +763,6 @@ def train_model(
         begin_prior_updates = 10,
         fix_signatures = None,
         max_trees_per_iter = None,
-        l2_regularization = None,
         in_corpus = True,*,
         n_components,
         corpuses,

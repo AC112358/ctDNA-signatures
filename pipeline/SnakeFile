@@ -20,6 +20,9 @@ FEATURE_TYPE_PARAMS = {
     'vector' : ['normalization', 'group'],
     'cardinality' : ['column'],
 }
+TRANSCRIPTION_INFO=f"{config['corpus_name']}/transcription-info.bed"
+
+
 
 def get_feature_config(wildcards):
     c = config['features'][wildcards.feature_name]
@@ -29,7 +32,10 @@ def get_feature_config(wildcards):
 def get_download_filename(feature_name, idx):
     feature_config = config['features'][feature_name]
     url=feature_config['url'][idx]
-    if urlparse(url).scheme in ('http', 'https',):
+
+    if url=='$transcription':
+        return TRANSCRIPTION_INFO
+    elif urlparse(url).scheme in ('http', 'https',):
         return  f'{config["corpus_name"]}/downloads/{feature_name}.{idx}.out'
     else:
         return url
@@ -55,6 +61,42 @@ rule all:
     input:
         [f"{config['corpus_name']}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() if not config['features'][feature_name]['skip']] + \
         [f"{config['corpus_name']}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
+
+
+
+rule download_gene_quant:
+    output:
+        temp(config['corpus_name'] + "/downloads/gene_quantification.bed")
+    params:
+        url=config['transcription']
+    resources:
+        mem_mb=512,
+        runtime=60
+    threads: 1
+    shell:
+        """
+        wget -O {output} {params.url}
+        """
+
+rule join_gene_quant:
+    input:
+        rules.download_gene_quant.output
+    output:
+        temp(TRANSCRIPTION_INFO)
+    params:
+        gene_annotation=config['gene_annotation']
+    resources:
+        mem_mb=1000,
+        runtime=30
+    threads: 1
+    conda: "locusregression"
+    shell:
+        '''
+        get_gene_features.py \
+            -genes {params.gene_annotation} \
+            -quant {input} \
+            --output {output}
+        '''
 
 
 rule download_resource:
@@ -123,6 +165,14 @@ def get_process_input(wildcards):
     return input_args
         
 
+def get_conda_envname(w):
+    envname=get_feature_config(w)['conda']
+    if envname.startswith('envs/'):
+        return os.path.join(config['_snakepath'], envname)
+    
+    return envname
+
+
 rule process_resource:
     input:
         get_process_input
@@ -134,7 +184,7 @@ rule process_resource:
         mem_mb=5000,
         runtime=30,
     threads: 1
-    conda: "locusregression"
+    conda: get_conda_envname
     shell:
         """
         {params.processing_fn} {output} {input}
@@ -209,7 +259,7 @@ rule get_background_mutrate:
     output:
         temp(mutrate_filename)
     params:
-        chr_prefix=config['chr_prefix'],
+        chr_prefix=config['chr_prefix']
     resources:
         mem_mb=2000,
         runtime=30,
@@ -239,7 +289,8 @@ rule ingest_sample:
     output:
         temp(config['corpus_name'] + ".added_samples/{sample_name}.txt")
     params:
-        weight_col=config['weight_col'],
+        chr_prefix=config['chr_prefix'],
+        weight_col='--weight-col ' + config['weight_col'] if 'weight_col' in config else '',
     group:
         get_sample_group
     resources:
@@ -253,7 +304,6 @@ rule ingest_sample:
             {input.corpus} \
             {input.sample_file} \
             --sample-name {wildcards.sample_name} \
-            --weight-col {params.weight_col} \
             --mutation-rate-bedgraph {input.background_mutation_rate} \
-            -fa {input.fasta}
+            {params.weight_col} -fa {input.fasta}
         """

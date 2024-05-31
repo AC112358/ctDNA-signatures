@@ -8,6 +8,9 @@ properties:
     description: Params to pass for corpus construction
     type: string
     default: ""
+  gene_annotation:
+    description: Path to the gene annotation bed file
+    type: string
   chromsizes:
     description: Path to the chromosome sizes file
     type: string
@@ -17,15 +20,18 @@ properties:
   window_size:
     description: Size of the window to be used for formatting features
     type: integer
-  corpus_name:
-    description: Name of the corpus
-    type: string
   chr_prefix:
     description: Prefix for the chromosome names
     type: string
     default: ""
   weight_col:
     description: Column to use for the weights
+    type: string
+  corpus_name:
+    description: Name of the corpus
+    type: string
+  chr_prefix:
+    description: Prefix for the chromosome names
     type: string
   dtype:
     description: Data type of the features
@@ -39,12 +45,15 @@ properties:
     patternProperties:
       ^[a-zA-Z0-9_]+$:
         type: string
-    type: object
   features:
     description: Features to be formatted
     patternProperties:
       ^[a-zA-Z0-9_]+$:
         properties:
+          conda:
+            description: Conda environment to use for processing the feature
+            type: string
+            default: locusregression
           processing_fn:
             description: Function to process the feature
             type: string
@@ -111,6 +120,6 @@ required:
 - window_size
 - corpus_name
 - chromsizes
-- weight_col
 - features
 - samples
+- gene_annotation

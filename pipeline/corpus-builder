@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+
+import subprocess
+import os
+import argparse
+import sys
+
+snakepath = os.path.dirname(os.path.abspath(__file__))
+snakefile = os.path.join(snakepath, 'Snakefile')
+profile = os.path.join(snakepath, 'default_configs')
+
+
+def check_file_exists(filename):
+    if not os.path.isfile(filename):
+        raise argparse.ArgumentTypeError(f'Invalid file name: {filename}')
+
+    return filename
+
+def check_dir_exists(dirname):
+    if not os.path.isdir(dirname):
+        raise argparse.ArgumentTypeError(f'Invalid directory name: {dirname}')
+    return dirname
+
+def add_snake_arg(command, key, value):
+    command.append(f'{key}={value}')
+    return command
+
+
+def get_snakemake_command(args):
+
+    command = [
+        'snakemake',
+        #'--profile', profile,
+        '-s', snakefile,
+    ]
+
+    if args.cluster:
+        command.extend(['--slurm'])
+        '''cluster_options = {
+            'cluster-cancel' : 'qdel',
+            'cluster': os.path.join(snakepath, 'cluster', 'qsub-submit.py'),
+            'cluster-status': os.path.join(snakepath, 'cluster', 'qsub-status.py'),
+            'jobscript': os.path.join(snakepath, 'cluster', 'qsub-jobscript.sh'),
+        }
+
+        for k, v in cluster_options.items():
+            command.extend([f'--{k}', str(v)])'''
+    else:
+        command.extend(
+            ['--cores', str(args.cores), '--latency-wait', '5', '--restart-times', '0']
+        )
+
+    if not args.snake_args is None:
+        command.extend( args.snake_args )
+
+    command.extend(['--directory', args.directory])
+
+    command.extend([
+        '--configfiles', args.samples_config, args.features_config, args.annotation_config,
+    ])
+
+    #add configuration arguments to the command string
+    command.append('--config')
+    add_snake_arg(command, '_snakepath', snakepath)
+
+    return command
+
+
+
+def get_parser():
+    
+    parser = argparse.ArgumentParser("Command to run metagenomics pipeline")
+        
+    parser.add_argument('--cluster', action = 'store_true', default=False,
+                            help = 'Run jobs on cluster instead of locally. This will use slurm to submit jobs to the scheduler.')
+    
+    parser.add_argument('--cores', '-c', type = int, default=1,
+                            help = 'Number of cores to use when running locally. Default: 1')    
+    
+    parser.add_argument('--annotation-config', '-annot', type = check_file_exists, required=True,
+                            help = 'Configuration file for parameters. Default: parameters.yaml')
+    
+    parser.add_argument('--features-config','-features', type = check_file_exists, required=True,
+                            help = 'Configuration file for sequences and annotations')
+    
+    parser.add_argument('--samples-config', '-samples', type = check_file_exists, required=True,
+                    help = 'Specifies the samples to process and their metadata.')
+    
+    parser.add_argument('--directory','-dir', type = check_dir_exists, required=True,
+                            help = 'Directory in which to save pipeline results. Providing a new directory\n'
+                                    'starts a new pipeline run. If the directory already exists, the pipeline\n'
+                                    'will resume from the last completed step.'
+                                )
+    
+    parser.add_argument('--snake-args', '-s', nargs = argparse.REMAINDER, 
+                            help = 'Arguments to pass to snakemake. Every argument passed after the -s flag will be passed to snakemake.\n'
+                                    'See the snakemake command line documentation for more information.'
+                                )
+    
+    return parser
+
+
+
+def main(args):
+
+    command = get_snakemake_command(args)
+
+    print('Running command:\n' + '\033[94m' + ' '.join(command) + '\033[0m\n\n', file = sys.stderr)
+
+    #4. Run the command string
+    subprocess.run(
+        ' '.join(command), shell = True,
+    )
+
+
+if __name__ == "__main__":
+    try:
+        args = get_parser().parse_args()
+        args.cluster
+    except AttributeError:
+        print(get_parser().format_help(), file = sys.stderr)
+    else:
+        main(args)

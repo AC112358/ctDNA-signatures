@@ -21,5 +21,5 @@ done
 bedtools multiinter -i $tmpdir/*.sorted.bed \
     | bedtools sort -i - \
     | bedtools merge -i - -c 4 -o max \
-    | awk -v OFS="\t" -v threshold=2 -v featurename=$feature_name '$4>=threshold {print $1,$2,$3,featurename}' \
+    | awk -v OFS="\t" -v threshold=$threshold -v featurename=$feature_name '$4>=threshold {print $1,$2,$3,featurename}' \
     > $out

@@ -46,7 +46,7 @@ IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_in5p_catalog_i
 IN5P_SIGS = IN5P_SIGS.to_dict()
 OUT5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out_sparse_selected.csv'), index_col=0) # re-unnormalized
 OUT5P_SIGS = OUT5P_SIGS.to_dict()
-LEN_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out_sparse_selected.csv'), index_col=0) # re-unnormalized
+LEN_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_length_k10.csv'), index_col=0) # re-unnormalized
 LEN_SIGS = LEN_SIGS.to_dict()
 
 
@@ -80,7 +80,7 @@ class SimulatedCorpus:
     
         return sigmatrix
     
-    def len_sig_to_matrix(length_sig):
+    def len_sig_to_matrix(length_sig): # I haven't tested this yet, I have to understand why the matrix has context and mutation dimensions rather than context x mutation vs sample
 
         sigmatrix = np.zeros((1, len(LENGTH_BINS)))
         

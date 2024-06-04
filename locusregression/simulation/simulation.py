@@ -1,5 +1,6 @@
 import numpy as np
 from ..corpus.sbs.observation_config import SBSSample, CONTEXT_IDX, MUTATIONS_IDX
+from ..corpus.length.observation_config import LENGTH_BINS
 from ..corpus import BED12Record, Corpus, InMemorySamples
 import json
 import os
@@ -31,7 +32,6 @@ TRINUC_PRIORS = np.array([
 SIGNAL_MEANS = np.array([1.,1.,1.])
 SIGNAL_STD = np.array([0.3, 0.25, 0.5])
 
-
 complement = {'A' : 'T','T' : 'A','G' : 'C','C' : 'G'}
 
 def revcomp(seq):
@@ -46,6 +46,8 @@ IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_in5p_catalog_i
 IN5P_SIGS = IN5P_SIGS.to_dict()
 OUT5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out_sparse_selected.csv'), index_col=0) # re-unnormalized
 OUT5P_SIGS = OUT5P_SIGS.to_dict()
+LEN_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out_sparse_selected.csv'), index_col=0) # re-unnormalized
+LEN_SIGS = LEN_SIGS.to_dict()
 
 
 class SimulatedCorpus:
@@ -76,9 +78,21 @@ class SimulatedCorpus:
         for context, p in motif_sig.items():
             sigmatrix[CONTEXT_IDX[context], 0] = p
     
-        return sigmatrix    
+        return sigmatrix
+    
+    def len_sig_to_matrix(length_sig):
 
+        sigmatrix = np.zeros((1, len(LENGTH_BINS)))
+        
+        length_bin_names = [f"{min_length}-{max_length}" for min_length, max_length in LENGTH_BINS]
+        mutation_idx = {name: idx for idx, name in enumerate(length_bin_names)}
 
+        for length_bin, p in length_sig.items():
+            sigmatrix[0, mutation_idx[length_bin]] = p
+
+        return sigmatrix
+
+    
     @staticmethod
     def create(
         corpus_name,

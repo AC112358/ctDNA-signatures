@@ -1,7 +1,7 @@
 
 import numpy as np
 from ._dirichlet_update import update_alpha
-from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS, OUT5P_SIGS
+from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS, OUT5P_SIGS, LEN_SIGS
 from sklearn.linear_model import PoissonRegressor
 from scipy.special import logsumexp
 from sklearn.preprocessing import OneHotEncoder
@@ -196,7 +196,7 @@ class ModelState:
 
                 sigmatrix = SimulatedCorpus.motif_sig_to_matrix(OUT5P_SIGS[sig])
                 
-            else:
+            elif 'in' in sig: # to fix in5p signatures, you need to specify 'in' in fix sigs names
                 try:
                     IN5P_SIGS[sig]
                 except KeyError:
@@ -204,6 +204,17 @@ class ModelState:
 
                 sigmatrix = SimulatedCorpus.motif_sig_to_matrix(IN5P_SIGS[sig])
                     
+            elif 'len' in sig: # to fix length signatures, you need to specify 'len' in fix sig names
+                try:
+                    LEN_SIGS[sig]
+                except KeyError:
+                    raise ValueError(f'Unknown signature {sig}')
+
+                sigmatrix = SimulatedCorpus.len_sig_to_matrix(LEN_SIGS[sig])
+                
+            else:
+                raise ValueError(f'Unknown signature {sig}')
+            
             self._rho[i] = sigmatrix * pseudocounts + 1.
             self._rho[i] = self._rho[i]/self._rho[i].sum(axis = -1, keepdims = True)
 

@@ -147,6 +147,10 @@ def read_regions(h5_object):
     return regions
 
 
+def read_context_frequencies(h5_object):
+    return h5_object['context_frequencies'][...]
+
+
 def create_corpus(filename, exposures=None,*,name, type, context_frequencies, regions):
 
     with h5.File(filename, 'w') as f:

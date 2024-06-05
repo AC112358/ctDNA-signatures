@@ -136,6 +136,41 @@ corpus_init_parser.add_argument('--in-corpus','-i', action = 'store_true', defau
 corpus_init_parser.set_defaults(func = create_corpus_wrapper)
 
 
+def convert_corpus_wrapper(*,corpus, output, dtype, fasta_file):
+
+    with h5.File(corpus,'r') as h5_object:
+        regions = read_regions(h5_object)
+        features = read_features(h5_object)
+        name=h5_object['metadata'].attrs['name']
+
+    SampleClass = Corpus._get_observation_class(dtype)
+    context_frequencies = SampleClass.get_context_frequencies(
+        window_set=regions,
+        fasta_file=fasta_file,
+    )        
+
+    create_corpus(
+        filename=output,
+        name=name,
+        type=dtype,
+        context_frequencies=context_frequencies,
+        regions=regions,
+    )
+
+    with buffered_writer(output) as h5_object:
+        for feature_name, feature_info in features.items():
+            write_feature(
+                h5_object,
+                name = feature_name,
+                **feature_info
+            )
+convert_parser = subparsers.add_parser('corpus-convert', help = 'Convert a corpus to a different type.')
+convert_parser.add_argument('corpus', type = file_exists)
+convert_parser.add_argument('--output','-o', type = valid_path, required = True, help = 'Where to save new corpus.')
+convert_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif-in5p','fragment-motif-out5p','fragment-length','indel',])
+convert_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
+
+
 def list_features_wrapper(*,corpus):
     with h5.File(corpus, 'r') as f:
         if not 'features' in f or len(f['features']) == 0:
@@ -596,6 +631,7 @@ def corpus_write_features_bedgraph(*,corpus,output):
             feature_names = features.columns,
             output = output,
         )
+
 write_features_bedgraph_parser = subparsers.add_parser('corpus-write-features-bedgraph',
     help = 'Write features in a corpus to a bedgraph file.'
 )

@@ -1,4 +1,5 @@
 $schema: https://json-schema.org/draft-06/schema#
+
 description: Configuration for formatting features for corpus
 properties:
   fasta:
@@ -30,21 +31,18 @@ properties:
   corpus_name:
     description: Name of the corpus
     type: string
-  chr_prefix:
-    description: Prefix for the chromosome names
-    type: string
   dtype:
     description: Data type of the features
     enum:
     - sbs
     - fragment-motif
     type: string
-    default: sbs
   samples:
     description: Samples to be ingested
     patternProperties:
       ^[a-zA-Z0-9_]+$:
         type: string
+    default: {}
   features:
     description: Features to be formatted
     patternProperties:
@@ -101,6 +99,14 @@ properties:
             description: Column to use for the feature
             type: integer
             default: 4
+          mem_mb:
+            description: MB for slurm job
+            type: integer
+            default: 1000
+          runtime:
+            description: Minutes for slurm job
+            type: integer
+            default: 60
           class_priority:
             description: Priority of the classes in the bed file
             type: array
@@ -116,10 +122,10 @@ properties:
 
 required:
 - fasta
+- dtype
 - blacklist
 - window_size
 - corpus_name
 - chromsizes
 - features
-- samples
 - gene_annotation

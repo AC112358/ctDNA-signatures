@@ -7,11 +7,17 @@ wildcard_constraints:
     feature_name="[a-zA-Z0-9_]+",
     idx="[0-9]+",
 
+
+def scale_by_attempt(base_mb):
+    def _scale_by_attempt(wildcards, attempt):
+        return base_mb*attempt
+    return _scale_by_attempt
+
 #configfile: "config.yaml"
 validate(config, 'config.schema.yaml')
 
-CORPUS_NAME=f"corpus.{config['corpus_name']}.h5"
-REGIONS_NAME=f"{config['corpus_name']}/regions.{config['corpus_name']}.bed"
+CORPUS_NAME="{corpus_name}/corpus.h5"
+REGIONS_NAME="{corpus_name}/regions.bed"
 FEATURE_TYPE_PARAMS = {
     'bigwig' : ['normalization', 'extend', 'group'],
     'bedgraph' : ['normalization', 'extend', 'group'],
@@ -20,9 +26,8 @@ FEATURE_TYPE_PARAMS = {
     'vector' : ['normalization', 'group'],
     'cardinality' : ['column'],
 }
-TRANSCRIPTION_INFO=f"{config['corpus_name']}/transcription-info.bed"
-
-
+TRANSCRIPTION_INFO="{corpus_name}/transcription-info.bed"
+   
 
 def get_feature_config(wildcards):
     c = config['features'][wildcards.feature_name]
@@ -36,7 +41,7 @@ def get_download_filename(feature_name, idx):
     if url=='$transcription':
         return TRANSCRIPTION_INFO
     elif urlparse(url).scheme in ('http', 'https',):
-        return  f'{config["corpus_name"]}/downloads/{feature_name}.{idx}.out'
+        return  f'{{corpus_name}}/downloads/{feature_name}.{idx}.out'
     else:
         return url
 
@@ -50,23 +55,35 @@ def get_ingestion_input_filename(feature_name):
     
     is_url = urlparse(url[0]).scheme in ('http', 'https',)
     if needs_processing:
-        return f'{config["corpus_name"]}/processed/{feature_name}.out'
+        return f'{{corpus_name}}/processed/{feature_name}.out'
     elif is_url:
-        return f'{config["corpus_name"]}/downloads/{feature_name}.0.out'
+        return f'{{corpus_name}}/downloads/{feature_name}.0.out'
     else:
         return url[0]
 
 
-rule all:
+rule all:   
+    input: f'{config["corpus_name"]}/DONE.txt'
+
+rule collect:
     input:
-        [f"{config['corpus_name']}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() if not config['features'][feature_name]['skip']] + \
-        [f"{config['corpus_name']}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
+        [f"{{corpus_name}}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() if not config['features'][feature_name]['skip']] + \
+        [f"{{corpus_name}}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
+    output:
+        touch("{corpus_name}/DONE.txt")
 
-
+rule test_submission:
+    output: 'test.submission.txt'
+    conda: 'locusregression'
+    resources:
+        mem_mb=500,
+        runtime=5
+    shell:
+        'echo "Success!" > {output}'
 
 rule download_gene_quant:
     output:
-        temp(config['corpus_name'] + "/downloads/gene_quantification.bed")
+        temp("{corpus_name}/downloads/gene_quantification.bed")
     params:
         url=config['transcription']
     resources:
@@ -101,16 +118,17 @@ rule join_gene_quant:
 
 rule download_resource:
     output:
-        temp(config['corpus_name'] + "/downloads/{feature_name}.{idx}.out")
+        temp("{corpus_name}/downloads/{feature_name}.{idx}.out")
     params:
         url=lambda w : get_feature_config(w)['url'][int(w.idx)]
     resources:
         mem_mb=512,
         runtime=60
     threads: 1
+    log: '{corpus_name}/logs/download_resource/{feature_name}.{idx}.log'
     shell:
         """
-        wget -O {output} {params.url}
+        wget -O {output} {params.url} 2> {log}
         """
 
 
@@ -128,14 +146,16 @@ rule get_regions:
         chromsizes=config['chromsizes'],
         blacklist=config['blacklist']
     output:
-        regions=REGIONS_NAME
+        regions=REGIONS_NAME,
+        report='{corpus_name}/regions_report.txt',
     params:
         window_size=config['window_size'],
     resources:
-        mem_mb=10000,
-        runtime=30
+        mem_mb=scale_by_attempt(10000),
+        runtime=scale_by_attempt(60)
     threads: 1
     conda: "locusregression"
+    log: '{corpus_name}/logs/get_regions.log'
     shell:
         """
         locusregression get-regions \
@@ -143,8 +163,8 @@ rule get_regions:
             --blacklist-file {input.blacklist} \
             --genome-file {input.chromsizes} \
             --categorical-features {input.categorical_features} \
-            --output {output}
-        """    
+            --output {output.regions} 2> {log} > {output.report}
+        """
 
 
 rule make_fake_windows:
@@ -173,21 +193,30 @@ def get_conda_envname(w):
     return envname
 
 
+def get_process_mem_mb(wildcards, attempt):
+    num_input=len(get_process_input(wildcards))-1
+    return get_feature_config(wildcards)['mem_mb']*num_input*attempt
+
+def get_process_runtime(wildcards, attempt):
+    return get_feature_config(wildcards)['runtime']*attempt
+
+
 rule process_resource:
     input:
         get_process_input
     output:
-        temp(config['corpus_name'] + "/processed/{feature_name}.out")
+        "{corpus_name}/processed/{feature_name}.out"
     params:
         processing_fn=lambda w : get_feature_config(w)['processing_fn'],
     resources:
-        mem_mb=5000,
-        runtime=30,
+        mem_mb=get_process_mem_mb,
+        runtime=get_process_runtime,
     threads: 1
     conda: get_conda_envname
+    log: '{corpus_name}/logs/process_resource/{feature_name}.log'
     shell:
         """
-        {params.processing_fn} {output} {input}
+        {params.processing_fn} {output} {input} 2> {log}
         """
 
 rule create_corpus:
@@ -201,10 +230,11 @@ rule create_corpus:
         corpus_name=config['corpus_name'],
         extra_params=config['extra_params'],
     resources:
-        mem_mb=3000,
-        runtime=60,
+        mem_mb=scale_by_attempt(10000),
+        runtime=scale_by_attempt(60),
     threads: 1
     conda: "locusregression"
+    log: '{corpus_name}/logs/create_corpus.log'
     shell:
         """
         locusregression corpus-create \
@@ -213,18 +243,24 @@ rule create_corpus:
             --fasta-file {params.fasta} \
             --dtype {params.dtype} \
             --regions-file {input.regions} \
-            {params.extra_params}
+            {params.extra_params} 2> {log}
         """
 
 def get_ingestion_params(wildcards):
     feature_config = get_feature_config(wildcards)
+    
     paramstr = ' '.join([
         f"--{k.replace('_', '-')} {v}"
         for k, v in feature_config.items()
         if k in FEATURE_TYPE_PARAMS[feature_config['type']]
     ])
+    
     if feature_config['type']=='bedgraph':
         paramstr+=' --genome-file ' + config['chromsizes']
+    
+    if feature_config['type'] in ('bedgraph','bigwig'):
+        paramstr+=' --extend ' + str(config['window_size']//2)
+
     return paramstr
 
 
@@ -233,22 +269,23 @@ rule ingest_feature:
         corpus=ancient(CORPUS_NAME),
         file=lambda w : get_ingestion_input_filename(w.feature_name),
     output:
-        touch(config['corpus_name'] + "/.added_features/{feature_name}.txt")
+        touch("{corpus_name}/.added_features/{feature_name}.txt")
     params:
         extra_params=get_ingestion_params,
         type=lambda w : get_feature_config(w)['type'],
     resources:
-        mem_mb=5000,
-        runtime=15,
+        mem_mb=scale_by_attempt(5000),
+        runtime=scale_by_attempt(60),
     threads: 1
     conda: "locusregression"
+    log: '{corpus_name}/logs/ingest_feature/{feature_name}.log'
     shell:
         """
         locusregression corpus-ingest-{params.type} \
             {input.corpus} \
             {input.file} \
             --feature-name {wildcards.feature_name} \
-            {params.extra_params} \
+            {params.extra_params} 2> {log}
         """
 
 mutrate_filename=CORPUS_NAME + '.mutrate.bedgraph'
@@ -265,13 +302,14 @@ rule get_background_mutrate:
         runtime=30,
     threads: 1
     conda: "locusregression"
+    log: '{corpus_name}/logs/get_background_mutrate.log'
     shell:
         """
         locusregression preprocess-estimate-mutrate \
             -vcfs {input.samples} \
             --chr-prefix {params.chr_prefix} \
             --genome-file {input.chromsizes} \
-            --output {output}
+            --output {output} 2> {log}
         """
 
 def get_sample_filename(wildcards):
@@ -287,17 +325,18 @@ rule ingest_sample:
         fasta=config['fasta'],
         background_mutation_rate=lambda w : CORPUS_NAME + '.mutrate.bedgraph',
     output:
-        temp(config['corpus_name'] + ".added_samples/{sample_name}.txt")
+        temp("{corpus_name}/.added_samples/{sample_name}.txt")
     params:
         chr_prefix=config['chr_prefix'],
         weight_col='--weight-col ' + config['weight_col'] if 'weight_col' in config else '',
     group:
         get_sample_group
     resources:
-        mem_mb=1000,
-        runtime=5,
+        mem_mb=scale_by_attempt(1000),
+        runtime=scale_by_attempt(5),
     threads: 1
     conda: "locusregression"
+    log: '{corpus_name}/logs/ingest_sample/{sample_name}.log'
     shell:
         """
         locusregression corpus-ingest-sample \
@@ -305,5 +344,5 @@ rule ingest_sample:
             {input.sample_file} \
             --sample-name {wildcards.sample_name} \
             --mutation-rate-bedgraph {input.background_mutation_rate} \
-            {params.weight_col} -fa {input.fasta}
+            {params.weight_col} -fa {input.fasta} 2> {log}
         """

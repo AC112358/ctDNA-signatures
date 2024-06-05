@@ -2,6 +2,7 @@ import os
 import subprocess
 import tempfile
 import sys
+from numpy import quantile
 from collections import defaultdict, Counter
 import logging
 logger = logging.getLogger('Windows')
@@ -147,7 +148,7 @@ def _endpoints_to_regions(endpoints, min_windowsize = 4): # change default min_w
         elif chrom != prev_chrom:
             active_features = Counter()
             prev_chrom = chrom; prev_pos = pos
-        elif pos > (prev_pos + min_windowsize) and len(active_features) > 0:
+        elif pos > prev_pos and len(active_features) > 0:
             
             is_nested_start = active_features[(track_id, feature)] > 0 and is_start
             is_nested_end = active_features[(track_id, feature)] > 1 and not is_start
@@ -183,8 +184,11 @@ def make_windows(
     window_size, 
     blacklist_file, 
     output=sys.stdout, 
+    min_windowsize=12,
 ):
     
+    windowsizes=[]
+
     logger.info(f'Checking sort order of bedfiles ...')
     for bedfile in bedfiles:
         subprocess.run(["sort", "-k1,1", "-k2,2n", "--check", bedfile], check=True)
@@ -240,22 +244,28 @@ def make_windows(
         subract_process.wait()
 
         logger.info(f'Writing final region set ...')
+        
+        windows_written=0
         for window_id, regions in regions_collection.items():
             
             chrs, starts, ends = list(zip(*regions))
             
             region_start=min(starts); region_end=max(ends)
             region_chr = chrs[0]
-
             num_blocks = len(regions)
+            region_len = sum(map(lambda x : x[0] - x[1], zip(ends, starts)))
             
+            if region_len < min_windowsize:
+                continue
+            
+            windowsizes.append(region_len)
             block_sizes = ','.join(map(lambda x : str(x[0] - x[1]), zip(ends, starts)))
             block_starts = ','.join(map(lambda s : str(s - region_start), starts))
 
             print(region_chr,    # chr
                   region_start,  # start
                   region_end,    # end
-                  window_id,     # name
+                  windows_written,     # name
                   '0','+',       # value, strand
                   region_start,  # thickStart
                   region_start,  # thickEnd
@@ -266,3 +276,15 @@ def make_windows(
                   sep='\t', 
                   file=output
             )
+            windows_written+=1
+
+    q=(0.1, 0.25, 0.5, 0.75, 0.9)
+    windowsize_dist=quantile(windowsizes, q)
+    print(
+f'''Window size report
+------------------
+Num windows   | {len(windowsizes)}
+Smallest      | {min(windowsizes)}
+Largest       | {max(windowsizes)}    
+''' + '\n'.join(('Quantile={: <4} | {}'.format(str(k),str(int(v))) for k,v in zip(q, windowsize_dist)))
+    )

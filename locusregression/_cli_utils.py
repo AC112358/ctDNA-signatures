@@ -39,8 +39,6 @@ def load_corpusstate_cache(model_path, corpus_path):
 
 
 
-
-
 def posint(x):
     x = int(x)
 
@@ -77,13 +75,11 @@ def valid_path(x):
     return x
 
 
-def load_dataset(corpuses, in_corpus = True):
+def load_dataset(corpuses):
 
     if len(corpuses) == 1:
         dataset = stream_corpus(corpuses[0])
         ## sandra: Following is do mapping 4mer contexts for out5p. It should be differently accommodate when we combine pos and neg files together for each sample in a corpus but for now just use this for pos out5p. 
-        if not in_corpus:
-            dataset.context_frequencies = dataset.get_context_frequencies(in_corpus=in_corpus)
 
     else:
         dataset = MetaCorpus(*[

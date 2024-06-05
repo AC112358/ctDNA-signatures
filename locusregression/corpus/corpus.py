@@ -5,7 +5,7 @@ import h5py as h5
 import logging
 from .sample import SampleLoader, InMemorySamples
 from .sbs.observation_config import SBSSample
-from .motif.observation_config import MotifSample
+from .motif.observation_config import MotifSampleIn5p, MotifSampleOut5p
 from .length.observation_config import LengthSample
 from pandas import DataFrame
 from tqdm import trange
@@ -116,8 +116,10 @@ class Corpus(CorpusMixin):
     def _get_observation_class(cls, classname):
         if classname.lower() == 'sbs':
             return SBSSample
-        elif classname.lower() == 'fragment-motif':
-            return MotifSample
+        elif classname.lower() in ('fragment-motif-in5p', 'fragment-motif'): # for backwards compatibility
+            return MotifSampleIn5p 
+        elif classname.lower() == 'fragment-motif-out5p':
+            return MotifSampleOut5p
         elif classname.lower() == 'fragment-length':
             return LengthSample
         else:
@@ -182,43 +184,6 @@ class Corpus(CorpusMixin):
     @property
     def num_mutations(self):
         return sum([sum(sample.weight) for sample in self.samples])
-
-    # Sandra added: this allows mapping of 4-mer context frequency matrix for four different types of fragments motifs
-    def get_context_frequencies(self, pos=True, in_corpus=True):
-        transform_func=None
-        def comp(seq):
-            trans_table = str.maketrans('ATCG', 'TAGC')
-            return seq.translate(trans_table)
-        def revcomp(seq):
-            trans_table = str.maketrans('ATCG', 'TAGC')
-            return seq[::-1].translate(trans_table)
-        if pos:
-            if in_corpus:
-                transform_func = None
-                logger.info(f'pos in5p')
-            else:
-                transform_func = lambda x: x[::-1]
-                logger.info(f'pos out5p')
-        else:
-            if in_corpus:
-                transform_func = revcomp
-                logger.info(f'neg in5p')
-            else:
-                transform_func = comp
-                logger.info(f'neg out5p')
-        
-        if transform_func is not None:
-            CONTEXTS = sorted(
-                map(lambda x : ''.join(x), product('ATCG','ATCG','ATCG', 'ATCG')), 
-                key = lambda x : (x[0], x[1], x[2], x[3])
-                )
-  
-            context_frequencies = pd.DataFrame(self.context_frequencies[0], index=CONTEXTS)
-            context_frequencies.index = [transform_func(seq) for seq in context_frequencies.index]
-            context_frequencies = context_frequencies.loc[CONTEXTS].values.reshape(self.context_frequencies.shape)          
-            return context_frequencies
-
-        return self.context_frequencies
         
 
     def subset_samples(self, subset_idx):

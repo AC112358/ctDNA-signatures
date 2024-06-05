@@ -62,7 +62,7 @@ class WeirdMutationError(Exception):
     pass
 
 
-class MotifSample(Sample):
+class MotifSampleBase(Sample):
 
     N_CARDINALITY=1
     N_CONTEXTS=256
@@ -137,16 +137,11 @@ class MotifSample(Sample):
     @classmethod
     def featurize_mutations(cls, 
                     motif_file, regions_file, fasta_file,
-                    chr_prefix = '', 
-                    weight_col = None, 
-                    mutation_rate_file=None,
-                    sample_weight=1.,
-                    in_corpus=True,
                     **kw,
                 ):
 
         def process_line(line, fasta_object, 
-                         positive_file=True, in_corpus=True):
+                         positive_file=True):
             
             fields = line.strip().split('\t')
 
@@ -176,7 +171,7 @@ class MotifSample(Sample):
                 context = out_4mer'''
             
             # @sandra: Can get the fragment end motifs from the fasta file - requires no preprocessing of fragment file
-            if positive_file and in_corpus:
+            if positive_file and cls.in_corpus:
                 context = fasta_object[chrom][frag_start-1:frag_start+3].seq.upper()
             elif positive_file:
                 context = fasta_object[chrom][frag_start-5 : frag_start-1][::-1].seq.upper()
@@ -204,7 +199,7 @@ class MotifSample(Sample):
         num_cols = 4
         # Construct the awk command with the correct column number for the start/end position from fragment input file
 
-        if in_corpus:
+        if cls.in_corpus:
             # condition 1: start of region should match or be less than the start of the fragment
             # condition 2: end of region should be greater than the start of the fragment
             awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'" # for pos in5p, start pos of fragment should be exist in locus
@@ -265,7 +260,7 @@ class MotifSample(Sample):
                     if not line:
                         break
             
-                    line_dict = process_line(line, fa, positive_file=positive_file, in_corpus=in_corpus)
+                    line_dict = process_line(line, fa, positive_file=positive_file)
                     #last_line = line
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
@@ -299,7 +294,7 @@ class MotifSample(Sample):
 
 
     @classmethod
-    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1, in_corpus=True):
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1):
     
         def count_fournucs(bed12_region, fasta_object):
 
@@ -315,7 +310,7 @@ class MotifSample(Sample):
             #end = bed12_region.end
             
             for chrom, start, end in bed12_region.segments():
-                if in_corpus:
+                if cls.in_corpus:
                     window_sequence = fasta_object[chrom][max(0, start-1) : end+3].seq.upper() # sandra fixed: for 4mer motifs it should be "[max(start-1,0) : end+3]" to avoid not counting the 4mer motifs starting after the end-3 index of the sequence. "start-1" is because of python indexing for list
                 else:
                      window_sequence = fasta_object[chrom][max(start-1-3,0) : end+3].seq.upper()  # sandra: it becomes -3/+3 since we forced to include start-1 and end+1 in the locus for neg files
@@ -344,3 +339,9 @@ class MotifSample(Sample):
 
         return fournuc_matrix # DON'T (!) normalize, the number of contexts in a window is part of the likelihood
     
+
+class MotifSampleIn5p(MotifSampleBase):
+    in_corpus = True
+
+class MotifSampleOut5p(MotifSampleBase):
+    in_corpus = False

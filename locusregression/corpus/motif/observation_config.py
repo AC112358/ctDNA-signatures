@@ -285,7 +285,7 @@ class MotifSampleBase(Sample):
                 mutations[k].append(v)
         
         for k, v in mutations.items():
-            mutations[k] = np.array(v).astype(MotifSample.type_map[k])
+            mutations[k] = np.array(v).astype(cls.type_map[k])
 
         return cls(
             **mutations,

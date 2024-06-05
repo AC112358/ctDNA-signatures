@@ -40,6 +40,7 @@ class LengthSample(Sample):
     N_CONTEXTS = N_CONTEXTS
     N_MUTATIONS = N_MUTATIONS
     N_ATTRIBUTES = N_ATTRIBUTES
+    in_corpus=True
 
     def plot(self, ax=None, figsize=(30, 3), show_strand=True, **kwargs):
         context_dist = np.zeros((self.N_CONTEXTS,))
@@ -94,14 +95,9 @@ class LengthSample(Sample):
     @classmethod
     def featurize_mutations(cls, 
                             motif_file, regions_file, fasta_file,
-                            chr_prefix='', 
-                            weight_col=None, 
-                            mutation_rate_file=None,
-                            sample_weight=1.,
-                            in_corpus=True,
                             **kw):
         
-        def process_line(line, fasta_object, positive_file=True, in_corpus=True):
+        def process_line(line, fasta_object, positive_file=True,):
             fields = line.strip().split('\t')
             chrom = fields[0]
             locus_idx = int(fields[3])
@@ -128,7 +124,7 @@ class LengthSample(Sample):
             }
 
         num_cols = 4
-        if in_corpus:
+        if cls.in_corpus:
             awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'"
         else:
             awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2}-1 && $3 > ${num_cols + 2}-1) print}}'"
@@ -168,7 +164,7 @@ class LengthSample(Sample):
                     if not line:
                         break
                     
-                    line_dict = process_line(line, fa, positive_file=positive_file, in_corpus=in_corpus)
+                    line_dict = process_line(line, fa, positive_file=positive_file)
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
 
@@ -199,7 +195,7 @@ class LengthSample(Sample):
         )
 
     @classmethod
-    def get_context_frequencies(cls, window_set, fasta_file, n_jobs=1, in_corpus=True):
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs=1):
         def count_contexts(bed12_region, fasta_object):
             # We always return 1 for the single context
             return [[1]]

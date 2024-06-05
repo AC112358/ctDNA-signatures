@@ -107,7 +107,7 @@ make_windows_parser.add_argument('--output','-o', type = argparse.FileType('w'),
 make_windows_parser.set_defaults(func = make_windows_wrapper)
 
 
-def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file, in_corpus=True):
+def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regions_file):
 
     regions = read_windows(regions_file)
 
@@ -115,7 +115,6 @@ def create_corpus_wrapper(dtype='sbs',*,filename, corpus_name, fasta_file, regio
     context_frequencies = SampleClass.get_context_frequencies(
         window_set=regions,
         fasta_file=fasta_file,
-        #in_corpus=in_corpus,
     )
 
     create_corpus(
@@ -131,12 +130,12 @@ corpus_init_parser.add_argument('filename', type = valid_path, help = 'Where to 
 corpus_init_parser.add_argument('--corpus-name','-n', type = str, required = True, help = 'Name of corpus, must be unique if modeling with other corpuses.')
 corpus_init_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
 corpus_init_parser.add_argument('--regions-file','-r', type = file_exists, required = True)
-corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif','fragment-length','indel',])
+corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif-in5p','fragment-motif-out5p','fragment-length','indel',])
 corpus_init_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 corpus_init_parser.set_defaults(func = create_corpus_wrapper)
 
 
-def convert_corpus_wrapper(*,corpus, output, dtype, fasta_file):
+def convert_corpus(*,corpus, output, dtype, fasta_file):
 
     with h5.File(corpus,'r') as h5_object:
         regions = read_regions(h5_object)
@@ -169,7 +168,19 @@ convert_parser.add_argument('corpus', type = file_exists)
 convert_parser.add_argument('--output','-o', type = valid_path, required = True, help = 'Where to save new corpus.')
 convert_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif-in5p','fragment-motif-out5p','fragment-length','indel',])
 convert_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
+convert_parser.set_defaults(func = convert_corpus)
 
+def corpus_info(*,corpus):
+    with h5.File(corpus, 'r') as f:
+        print(f'Name: {f["metadata"].attrs["name"]}')
+        print(f'Type: {f["metadata"].attrs["type"]}')
+        print(f'Number of regions: {len(f["regions"]["start"][...])}')
+        print(f'Number of samples: {len(f["samples"]) if "samples" in f else 0}')
+        print(f'Number of features: {len(f["features"]) if "features" in f else 0}')
+
+info_parser = subparsers.add_parser('corpus-info', help = 'Get information about a corpus.')
+info_parser.add_argument('corpus', type = file_exists)
+info_parser.set_defaults(func = corpus_info)
 
 def list_features_wrapper(*,corpus):
     with h5.File(corpus, 'r') as f:
@@ -484,7 +495,6 @@ def ingest_sample(mutation_rate_bedgraph=None,
                   sample_name=None,
                   weight_col=None,
                   chr_prefix='',
-                  in_corpus=True,
                   sample_weight=1.,
                   *,corpus, sample_file, fasta_file
                 ):
@@ -505,7 +515,6 @@ def ingest_sample(mutation_rate_bedgraph=None,
             chr_prefix = chr_prefix,
             weight_col = weight_col,
             mutation_rate_file = mutation_rate_bedgraph,
-            in_corpus = in_corpus,
             sample_weight=sample_weight,
         )
     
@@ -522,7 +531,6 @@ ingest_sample_parser.add_argument('--weight-col','-w', type = str, default=None,
 ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_exists, default=None, help = 'Bedgraph file of mutation rates.')
 ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
-ingest_sample_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 ingest_sample_parser.add_argument('--sample-weight','-sw', type = posfloat, default=1., help = 'Weight to assign to sample.')
 ingest_sample_parser.set_defaults(func = ingest_sample)
 
@@ -804,13 +812,10 @@ def train_model(
         model_type = 'linear',
         begin_prior_updates = 10,
         fix_signatures = None,
-        max_trees_per_iter = None,
-        in_corpus = True,*,
+        max_trees_per_iter = None,*,
         n_components,
         corpuses,
         output,
-        
-        
     ):
 
     basemodel = get_basemodel(model_type)
@@ -843,7 +848,7 @@ def train_model(
     logger.setLevel(logging.INFO)
 
 
-    dataset = load_dataset(corpuses, in_corpus)
+    dataset = load_dataset(corpuses)
 
     if not train_size is None:
         logger.info('Splitting train and test set ...')
@@ -908,14 +913,13 @@ trainer_optional.add_argument('--bound-tol', '-tol', type = posfloat, default=1e
 trainer_optional.add_argument('--verbose','-v',action = 'store_true', default = False,)
 trainer_optional.add_argument('--n-jobs', '-j', type = posint, default=1)
 trainer_optional.add_argument('--max-trees-per-iter', type = posint, default=25)
-trainer_optional.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify train model for in5p or out5p motifs (by default it will be trained for out5p motifs).')
 trainer_sub.set_defaults(func = train_model)
 
 
 
-def score(subset_by_loci=False,in_corpus = True,*,model, corpuses):
+def score(subset_by_loci=False,*,model, corpuses):
 
-    dataset = load_dataset(corpuses, in_corpus)
+    dataset = load_dataset(corpuses)
 
     model = load_model(model)
 
@@ -931,9 +935,9 @@ score_parser.add_argument('--in-corpus','-i', action = 'store_true', default=Fal
 score_parser.set_defaults(func = score)
 
 
-def predict(in_corpus = True,*,model, corpuses, output):
+def predict(*,model, corpuses, output):
 
-    dataset = load_dataset(corpuses, in_corpus)
+    dataset = load_dataset(corpuses)
 
     model = load_model(model)
 
@@ -982,10 +986,10 @@ list_components_parser.add_argument('model', type = file_exists)
 list_components_parser.set_defaults(func = list_components)
 
 
-def get_mutation_rate_r2(in_corpus = True,*, model, corpuses):
+def get_mutation_rate_r2(*, model, corpuses):
 
     model = load_model(model)
-    dataset = load_dataset(corpuses, in_corpus)
+    dataset = load_dataset(corpuses)
     
     print(
         model.get_mutation_rate_r2(dataset),
@@ -1001,11 +1005,11 @@ mutrate_r2_parser.add_argument('--in-corpus','-i', action = 'store_true', defaul
 mutrate_r2_parser.set_defaults(func = get_mutation_rate_r2)
 
 
-def calc_locus_explanations(in_corpus = True,*,model,corpuses,components,n_jobs=1, subsample=10000):
+def calc_locus_explanations(*,model,corpuses,components,n_jobs=1, subsample=10000):
 
     model_path = model
     model = load_model(model)
-    dataset = load_dataset(corpuses, in_corpus)
+    dataset = load_dataset(corpuses)
 
     model.calc_locus_explanations(dataset,*components,n_jobs=n_jobs, subsample=subsample)
     model.save(model_path)

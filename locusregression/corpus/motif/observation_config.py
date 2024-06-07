@@ -11,6 +11,7 @@ import tqdm
 import subprocess
 import os
 import tempfile
+import pandas as pd
 logger = logging.getLogger('Motif-DataReader')
 logger.setLevel(logging.INFO)
 
@@ -342,6 +343,19 @@ class MotifSampleBase(Sample):
 
 class MotifSampleIn5p(MotifSampleBase):
     in_corpus = True
+    @classmethod
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1):
+        # for positive strand in5p motifs, no need to transform the sequence, but future negative strand motifs will need to be transformed
+        return super(MotifSampleIn5p, cls).get_context_frequencies(window_set, fasta_file, n_jobs = n_jobs)
+
 
 class MotifSampleOut5p(MotifSampleBase):
     in_corpus = False
+    @classmethod
+    def get_context_frequencies(cls, window_set, fasta_file, n_jobs = 1):
+        transform_func = lambda x: x[::-1] # for positive strand out5p motifs
+        _context_frequencies = super(MotifSampleOut5p, cls).get_context_frequencies(window_set, fasta_file,  n_jobs = n_jobs)
+        context_frequencies = pd.DataFrame(_context_frequencies[0], index=CONTEXTS)
+        context_frequencies.index = [transform_func(seq) for seq in context_frequencies.index]
+        context_frequencies = context_frequencies.loc[CONTEXTS].values.reshape(_context_frequencies.shape)          
+        return context_frequencies

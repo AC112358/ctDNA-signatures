@@ -30,7 +30,7 @@ N_MUTATIONS = len(LENGTH_BINS)
 N_ATTRIBUTES = 1
 
 # Create mutation indices
-MUTATION_IDX = {i: idx for idx, (i, j) in enumerate(LENGTH_BINS)}
+MUTATION_IDX = {length_bin: idx for idx, length_bin in enumerate(LENGTH_BINS)}
 
 class WeirdMutationError(Exception):
     pass
@@ -74,9 +74,9 @@ class LengthSample(Sample):
             edgecolor='white',
             linewidth=0.5,
         )
-        extent = max(context_dist)
-
-        ax.bar(height=context_dist, **plot_kw)
+        extent = max(mutation_dist[0])
+        
+        ax.bar(height=mutation_dist[0], **plot_kw)
         ax.set(yticks=[0, extent], xticks=[], 
                xlim=(-1, len(LENGTH_BINS)), ylim=(-1e-6, 1.1 * extent))
         if show_xticks:
@@ -166,7 +166,7 @@ class LengthSample(Sample):
                     
                     line_dict = process_line(line, fa, positive_file=positive_file)
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
-                    mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
+                    mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['mutation']}"
 
                     if mutation_group_key not in mutations_grouped:
                         mutations_grouped[mutation_group_key] = {}

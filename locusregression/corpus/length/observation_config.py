@@ -15,14 +15,14 @@ logger = logging.getLogger('Length-DataReader')
 logger.setLevel(logging.INFO)
 
 # Length bins
-LENGTH_BINS = [(50, 100), (100, 105), (105, 110), (110, 115), (115, 120), 
-               (120, 125), (125, 130), (130, 135), (135, 140), (140, 145), 
-               (145, 150), (150, 155), (155, 160), (160, 165), (165, 170), 
-               (170, 175), (175, 180), (180, 185), (185, 190), (190, 195), 
-               (195, 200), (200, 210), (210, 220), (220, 230), (230, 240), 
-               (240, 250), (250, 260), (260, 270), (270, 280), (280, 290), 
-               (290, 300), (300, 310), (310, 320), (320, 330), (330, 340), 
-               (340, 350), (350, 700)]
+LENGTH_BINS = [
+    (70, 80),  (80, 90),  (90, 100), (100, 105), (105, 110),
+    (110, 115), (115, 120), (120, 125), (125, 130), (130, 135), (135, 140), (140, 145),
+    (145, 150), (150, 155), (155, 160), (160, 165), (165, 170), (170, 175), (175, 180),
+    (180, 185), (185, 190), (190, 195), (195, 200), (200, 205), (205, 210), (210, 220),
+    (220, 230), (230, 240), (240, 250), (250, 260), (260, 270), (270, 280), (280, 290),
+    (290, 300), (300, 310), (310, 320), (320, 330), (330, 340), (340, 350), (350, 701)
+]
 
 N_CARDINALITY = 1
 N_CONTEXTS = 1
@@ -103,7 +103,7 @@ class LengthSample(Sample):
             locus_idx = int(fields[3])
             frag_start = int(fields[5])
             frag_end = int(fields[6])
-            length = frag_end - frag_start
+            length = frag_end - frag_start + 1
 
             for min_length, max_length in LENGTH_BINS:
                 if min_length <= length < max_length:
@@ -124,10 +124,7 @@ class LengthSample(Sample):
             }
 
         num_cols = 4
-        if cls.in_corpus:
-            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'"
-        else:
-            awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2}-1 && $3 > ${num_cols + 2}-1) print}}'"
+        awk_cmd = f"awk '{{if ($2 <= ${num_cols + 2} && $3 > ${num_cols + 2}) print}}'"
 
         segments = []
         for region in read_windows(regions_file):
@@ -165,6 +162,11 @@ class LengthSample(Sample):
                         break
                     
                     line_dict = process_line(line, fa, positive_file=positive_file)
+
+                    if line_dict is None:
+                        logging.warning(f'Processing line resulted in None: {line.strip()}')
+                        continue
+                    
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['mutation']}"
 

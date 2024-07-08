@@ -122,7 +122,7 @@ def bed12_matrix_to_bedgraph(
         
         for chr, start, end in region.segments():
             if normalize_to_windowlength:
-                segments.append((chr, start, end, matrix_row/total_region_length*(end-start)))
+                segments.append((chr, start, end, matrix_row/total_region_length)) #*(end-start)))
             else:
                 segments.append((chr, start, end, matrix_row))
     

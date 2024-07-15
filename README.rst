@@ -1,3 +1,8 @@
+Which branch should I use?
+**************************
+
+Currently - `intra-corpus-norm`!
+
 
 LocusRegression
 ***************

@@ -6,44 +6,20 @@ from sklearn.compose import ColumnTransformer
 from sklearn.base import clone, BaseEstimator
 from sklearn import set_config
 import logging
-from numpy import array
+from numpy import array, vstack
 logger = logging.getLogger(' LocusRegressor')
 set_config(enable_metadata_routing=True)
 
 
-
-class ClassStratifiedTransformer(BaseEstimator):
-
-    def __init__(self, transformer):
-        self.transformer = transformer
-
-    def fit(self, X, y=None):
-        self.transformer.fit(X, y)
-        return self
-    
-    def transform(self, X, y=None):
-        return self.transformer.transform(X)
-    
-    def fit_transform(self, X, y=None):
-        return self.transformer.fit_transform(X, y)
-
-
-def _assemble_matrix(feature_names, corpus_states):
-        
-    feature_matrix = pd.concat([
-        pd.DataFrame(
-            {feature_name : state.features[feature_name]['values'] for feature_name in feature_names}
+def _assemble_matrix(feature_names, features):
+    '''
+    For a single corpus, assemble a matrix of features.
+    '''
+    return pd.DataFrame(
+            {feature_name : features[feature_name]['values'] 
+             for feature_name in feature_names
+            }
         )
-        for state in corpus_states.values()
-    ])
-
-    corpus_labels = array([
-        name
-        for name, state in corpus_states.items()
-        for _ in  range(len(state.features[feature_names[0]]['values']))
-    ]).astype(str)
-
-    return feature_matrix, corpus_labels
 
 
 class FeatureTransformer:
@@ -81,50 +57,66 @@ class FeatureTransformer:
         _slice = self.transformer_.output_indices_['categorical']
         
         return list(range(_slice.start, _slice.stop))
+    
 
+    @property
+    def transformer_(self):
+        return next(iter(self.transformers_.values()))
+    
 
-    def fit(self, corpus_states):
-        
+    def get_base_transformer(self, corpus_states):
+
         example_features = next(iter(corpus_states.values())).features
         
         self.feature_names_ = list([f for f in example_features.keys() if example_features[f]['type'] != 'cardinality'])
         self.feature_types_ = [example_features[feature]['type'] for feature in self.feature_names_]
         self.groups_ = [example_features[feature]['group'].split(',') for feature in self.feature_names_]
         
-        feature_type_dict_ = defaultdict(list)        
+        self.feature_type_dict_ = defaultdict(list)        
         for idx, feature_type in enumerate(self.feature_types_):
-            feature_type_dict_[feature_type].append(idx)
+            self.feature_type_dict_[feature_type].append(idx)
 
-        self.transformer_ = ColumnTransformer([
-            ('power', PowerTransformer(), feature_type_dict_['power']),
-            ('minmax', MinMaxScaler(), feature_type_dict_['minmax']),
-            ('quantile', QuantileTransformer(output_distribution='uniform'), feature_type_dict_['quantile']),
-            ('standardize', StandardScaler(), feature_type_dict_['standardize']),
-            ('robust', RobustScaler(), feature_type_dict_['robust']),
-            ('categorical', self.categorical_encoder, feature_type_dict_['categorical']),],
+        # Set the categories for the categorical encoder so that it uses the 
+        # same categories across all datasets
+        example_matrix = _assemble_matrix(self.feature_names_, example_features)
+        categorical_features = example_matrix.iloc[:, self.feature_type_dict_['categorical']]
+
+        cat_encoder = clone(self.categorical_encoder).set_params(
+            categories=[
+                list(categorical_features[feature].unique()) 
+                for feature in categorical_features.columns
+            ])
+
+        return ColumnTransformer([
+            ('power', PowerTransformer(), self.feature_type_dict_['power']),
+            ('minmax', MinMaxScaler(), self.feature_type_dict_['minmax']),
+            ('quantile', QuantileTransformer(output_distribution='uniform'), self.feature_type_dict_['quantile']),
+            ('standardize', StandardScaler(), self.feature_type_dict_['standardize']),
+            ('robust', RobustScaler(), self.feature_type_dict_['robust']),
+            ('categorical', cat_encoder, self.feature_type_dict_['categorical']),],
             remainder='passthrough',
             verbose_feature_names_out=False,
         )
 
-        matrix, labels = _assemble_matrix(self.feature_names_, corpus_states)
 
-        self.transformer_.fit(matrix, y=labels)
+    def fit(self, corpus_states):
+        
+        self.transformers_ = {}
+        base_transformer = self.get_base_transformer(corpus_states)
 
-        if len(feature_type_dict_['categorical']) > 0:
-            logger.info(
-                f'Found categorical features: {", ".join(self.feature_names_out[i] for i in self.list_categorical_features())}'
-            )
+        for corpus_name, corpus_state in corpus_states.items():
+            matrix = _assemble_matrix(self.feature_names_, corpus_state.features)
+            self.transformers_[corpus_name] = clone(base_transformer).fit(matrix)
+
+        # outro messages
+        if len(self.feature_type_dict_['categorical']) > 0:
+            logger.info(f'Found categorical features: {", ".join(self.feature_names_out[i] for i in self.list_categorical_features())}')
             
         for feature_group in self.list_feature_groups():
             if len(feature_group) > 0:
-                logger.info(
-                    f'Found feature group: {", ".join(self.feature_names_out[i] for i in feature_group)}'
-                )
+                logger.info(f'Found feature group: {", ".join(self.feature_names_out[i] for i in feature_group)}')
 
         return self
-    
-    def assemble_matrix(self, corpus_states):
-        return _assemble_matrix(self.feature_names_, corpus_states)
 
 
     def transform(self, corpus_states):
@@ -132,27 +124,28 @@ class FeatureTransformer:
         for corpus_state in corpus_states.values():
             assert all([f in corpus_state.feature_names for f in self.feature_names_])
 
-        matrix, labels = self.assemble_matrix(corpus_states)
-        transformed_matrix = self.transformer_.transform(matrix)#, y=labels)
-
-        return transformed_matrix
+        if len(corpus_states) == 1:
+            corpus_name, state = next(iter(corpus_states.items()))
+            return self.transformers_[corpus_name].transform(
+                _assemble_matrix(self.feature_names_, state.features)
+            )
+        else:
+            return vstack([
+                self.transformers_[corpus_name].transform(
+                    _assemble_matrix(self.feature_names_, corpus_state.features)
+                )
+                for corpus_name, corpus_state in corpus_states.items()
+            ])
     
 
 
 class CardinalityTransformer(BaseEstimator):
 
     def fit(self, corpus_states):
-        
         example_features = next(iter(corpus_states.values())).features
-        
         self.feature_names_ = list([f for f in example_features.keys() if example_features[f]['type'] == 'cardinality'])
-
-        logger.info(
-            f'Found cardinality features: {", ".join(self.feature_names_)}'
-        )
-        
+        logger.info(f'Found cardinality features: {", ".join(self.feature_names_)}')
         self.transformer_ = LabelEncoder().fit(['-','.','+'])
-        
         return self
     
 
@@ -161,12 +154,15 @@ class CardinalityTransformer(BaseEstimator):
         for corpus_state in corpus_states.values():
             assert all([f in corpus_state.feature_names for f in self.feature_names_])
 
-        matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
-        matrix = matrix.values
+        #matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
+        #matrix = matrix.values
+        matrix=pd.concat([
+            _assemble_matrix(self.feature_names_, corpus_state.features)
+            for corpus_state in corpus_states.values()
+        ]).values
         
         transformed_matrix = array([
             self.transformer_.transform(matrix[:,col]) - 1
             for col in range(matrix.shape[1])
         ]).T
-
         return transformed_matrix

@@ -146,9 +146,7 @@ class ModelState:
                 for _strand in strand_combinations
                 for _intercept in map(tuple, np.eye(self.n_distributions, dtype=int))
             ]
-
             self._tau_combinations_map = dict(zip(X_tau_combinations, range(len(X_tau_combinations))))
-
             self._tau_features = np.array(list(self._tau_combinations_map.keys()))
             
         else:
@@ -234,16 +232,16 @@ class ModelState:
                     )
     
 
-    def _get_label_vector(self, corpus_states, n_repeats):
-        return np.concatenate([[name]*n_repeats for name in corpus_states.keys()])
-    
-
     def _get_label_idx_vector(self, corpus_states, n_repeats):
         labels = self._get_label_vector(corpus_states, n_repeats)
         return self.corpus_intercept_encoder_.transform(
             labels.reshape((-1,1))
         ).indices
     
+
+    def _get_label_vector(self, corpus_states, n_repeats):
+        return np.concatenate([[name]*n_repeats for name in corpus_states.keys()])
+
 
     def _get_onehot_column(self, corpus_states, n_repeats):
         labels = self._get_label_vector(corpus_states, n_repeats)
@@ -254,11 +252,14 @@ class ModelState:
         return encoded_labels
 
 
-    def _get_design_matrix(self, corpus_states):
-        n_loci = next(iter(corpus_states.values())).n_loci
-        return self._get_onehot_column(corpus_states, n_loci)
+    def _get_design_matrix(self, corpus_states, repeat=1):
+        #return self._get_onehot_column(corpus_states)   
+        label_vec = np.concatenate([[name]*state.n_loci*repeat for name, state in corpus_states.items()])
+        encoded_labels = self.corpus_intercept_encoder_.transform(
+            label_vec.reshape((-1,1))
+        )
+        return encoded_labels
     
-
     
     @staticmethod
     def _svi_update_fn(old_value, new_value, learning_rate):
@@ -290,7 +291,7 @@ class ModelState:
 
     def _get_tau_features(self, corpus_states):
         
-        n_bins = next(iter(corpus_states.values())).n_loci
+        #n_bins = next(iter(corpus_states.values())).n_loci
 
         def _get_cardinality_features(corpus_state):
             strand_features = self.strand_transformer.transform({corpus_state.name : corpus_state})
@@ -302,10 +303,10 @@ class ModelState:
                 for state in corpus_states.values()
             ], axis = 0
         )
-        
+
         # add a column for the corpus intercept
         X = np.hstack([
-            X, self._get_onehot_column(corpus_states, 2*n_bins).toarray()
+            X, self._get_design_matrix(corpus_states, repeat=2).toarray() #self._get_onehot_column(corpus_states, 2*n_bins).toarray()
         ])
 
         indices = np.array([self._tau_combinations_map[tuple(row)] for row in X])
@@ -320,7 +321,7 @@ class ModelState:
 
     def _get_tau_targets(self, k, sstats, corpus_states, design_matrix):
 
-        n_bins = next(iter(corpus_states.values())).n_loci
+        #n_bins = next(iter(corpus_states.values())).n_loci
 
         def _get_cardinality_exposure(corpus_state):
             # 1xCx1 @ DxCxL --> DxL + 1xL --> DxL --> [L_d1 \+ L_d2]
@@ -328,9 +329,10 @@ class ModelState:
                 (self.lambda_[k][None, :, None] * corpus_state.context_frequencies).sum(1) * \
                 corpus_state.exposures * np.exp(corpus_state.theta_[k])[None,:]
             ).ravel()
+        
         logger.debug(f"corpus_states.keys(): {corpus_states.keys()}; corpus_states.values(): {corpus_states.values()}") ## sandra
         eta = np.concatenate([_get_cardinality_exposure(state) for state in corpus_states.values()]) # I x C -> I*C
-        target = np.concatenate([sstats[name].tau_sstats(k, n_bins).ravel() for name in corpus_states.keys()])
+        target = np.concatenate([sstats[name].tau_sstats(k, state.n_loci).ravel() for name, state in corpus_states.items()])
         logger.debug(f"design_matrix: {design_matrix.shape}; eta: {eta.shape}; target: {target.shape}") ## sandra 
         eta = design_matrix.dot(eta); target = design_matrix.dot(target) ## sandra;  dimension mismatch error occurred here since cardinality_dim of motif is 1 
 

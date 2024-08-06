@@ -633,14 +633,32 @@ empirical_mutrate_parser.add_argument('--no-subclonal', '-ns', action = 'store_t
 empirical_mutrate_parser.set_defaults(func = empirical_mutation_rate)
 
 
+def get_unstacked_regions(*,corpus,output):
+
+    with _get_regions_filename(corpus) as regions_file:
+
+        num_regions=len(read_windows(regions_file))
+        
+        bed12_matrix_to_bedgraph(
+            normalize_to_windowlength = False,
+            regions_file = regions_file,
+            matrix = np.arange(num_regions, dtype=int)[:,None],
+            feature_names = ['region_num'],
+            output = output,
+        )
+
+unstacked_regions_parser = subparsers.add_parser('corpus-unstack-regions',
+    help = 'Unstack regions in a corpus to a bedgraph file.'
+)
+unstacked_regions_parser.add_argument('corpus', type = file_exists)
+unstacked_regions_parser.add_argument('--output', '-o', type = argparse.FileType('w'),
+                                    default = sys.stdout)
+unstacked_regions_parser.set_defaults(func = get_unstacked_regions)
+
+
 def corpus_write_features_bedgraph(*,corpus,output):
 
     with _get_regions_filename(corpus) as regions_file:
-        #corpus_object = stream_corpus(corpus)
-        #features = corpus_object.get_features_df()
-        #cardinality_features = corpus_object.get_cardinality_features_df()
-        #features = concat([features, cardinality_features], axis = 1)
-        #del cardinality_features
         with h5.File(corpus, 'r') as h5_object:
             features=DataFrame(
                 {

@@ -207,12 +207,16 @@ def _load_corpus(filename, sample_obj):
 def load_corpus(filename):
 
     sample_type = peek_type(filename)
-
+    
     with h5.File(filename, 'r') as f:
-        samples = InMemorySamples([
-            sample_type.read_h5_dataset(f, f'samples/{i}')
-            for i in f['samples'].keys()
-        ])
+
+        if 'samples' in f:
+            samples = InMemorySamples([
+                sample_type.read_h5_dataset(f, f'samples/{i}')
+                for i in f['samples'].keys()
+            ])
+        else:
+            samples = InMemorySamples([])
 
     return _load_corpus(
         filename,
@@ -222,9 +226,12 @@ def load_corpus(filename):
 
 def stream_corpus(filename):
 
+    with h5.File(filename, 'r') as f:
+        has_samples = 'samples' in f
+
     return _load_corpus(
         filename,
-        SampleLoader(filename, observation_class=peek_type(filename))
+        SampleLoader(filename, observation_class=peek_type(filename)) if has_samples else InMemorySamples([]),
     )
 
 

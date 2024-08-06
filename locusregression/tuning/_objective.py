@@ -53,7 +53,7 @@ def objective(trial,
             quiet=False,
             seed = trial.number,
             num_epochs=num_epochs,
-            n_jobs=n_jobs,
+            #n_jobs=n_jobs,
             **model_params,
         )
     

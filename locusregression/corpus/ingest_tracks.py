@@ -169,8 +169,8 @@ def make_distance_features(
 
     total_distance = upstream + downstream
 
-    progress[nan_mask] = np.nan
-    total_distance[nan_mask] = np.nan
+    progress[nan_mask] = 0.
+    total_distance[nan_mask] = 0.
     
     return progress, total_distance
 

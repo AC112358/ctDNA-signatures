@@ -151,7 +151,8 @@ class CardinalityTransformer(BaseEstimator):
             f'Found cardinality features: {", ".join(self.feature_names_)}'
         )
         
-        self.transformer_ = LabelEncoder().fit(['-','.','+'])
+        # theres actually no fitting to be done.
+        #self.transformer_ = LabelEncoder(classes=['-','.','+']).fit(['-','.','+'])
         
         return self
     
@@ -162,11 +163,13 @@ class CardinalityTransformer(BaseEstimator):
             assert all([f in corpus_state.feature_names for f in self.feature_names_])
 
         matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
-        matrix = matrix.values
+        #matrix = matrix.values
         
-        transformed_matrix = array([
-            self.transformer_.transform(matrix[:,col]) - 1
-            for col in range(matrix.shape[1])
-        ]).T
+        #transformed_matrix = array([
+        #    self.transformer_.transform(matrix[:,col]) - 1
+        #    for col in range(matrix.shape[1])
+        #]).T
+        conversion_dict={'+' : 1, '-' : -1, '.' : 0}
+        transformed_matrix=matrix.map(lambda x : conversion_dict[x]).values
 
         return transformed_matrix

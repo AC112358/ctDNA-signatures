@@ -281,7 +281,9 @@ class SBSSample(Sample):
                     chr_prefix = '', 
                     weight_col = None, 
                     mutation_rate_file=None,
-                    sample_weight=1.,
+                    sample_weight=None,
+                    sample_name=None,
+                    pass_only=True,
                     **kw,
                 ):
 
@@ -298,6 +300,11 @@ class SBSSample(Sample):
                 chrom = chrom, pos = pos, ref = ref, alt = alt, fasta_object = fasta_object
             )
 
+            try:
+                float(weight)
+            except ValueError:
+                raise WeirdMutationError(f'A mutation had weight={weight}, which could not be converted to float.')
+
             return {
                 'chrom' : chrom,
                 'locus' : locus_idx,
@@ -309,9 +316,15 @@ class SBSSample(Sample):
                 'pos' : int(pos),
             }
 
+        if weight_col is None and sample_name is None:
+            num_samples=len(subprocess.check_output(f'bcftools query -l {vcf_file}', shell=True).decode().strip().split('\n'))
+            assert num_samples <=1, "Multiple samples were found in this vcf file. You must specify a `sample_name` in order to extract mutation weights."
+
+        if weight_col is None and sample_weight is None:
+            logger.warning('If no manually-defined mutation weight is provided, you should use the tumor purity (0-1) as the `sample_weight`.')
 
         query_statement = chr_prefix + '%CHROM\t%POS0\t%POS\t%POS0|%REF|%ALT|' \
-                                                    + ('1\n' if weight_col is None else f'%INFO/{weight_col}\n')
+                                        + ('[%AF]\n' if weight_col is None else f'%INFO/{weight_col}\n')
         
         try:
             
@@ -330,15 +343,22 @@ class SBSSample(Sample):
 
                 query_process = get_passed_SNVs(clustered_vcf.name, query_statement,
                                                 filter_string='clusterSize<3',
+                                                sample=sample_name,
+                                                pass_only=pass_only
                                                 )
 
                 clustered_mutations_vcf, _ = get_passed_SNVs(clustered_vcf.name, query_statement,
                                                 filter_string='clusterSize>=3',
+                                                sample=sample_name,
+                                                pass_only=pass_only
                                                 ).communicate()
                 n_cluster_mutations = len(clustered_mutations_vcf.split("\n"))
 
             else:
-                query_process = get_passed_SNVs(vcf_file, query_statement)
+                query_process = get_passed_SNVs(vcf_file, query_statement, 
+                                                sample=sample_name,
+                                                pass_only=pass_only
+                                                )
                 n_cluster_mutations = 0
 
             intersect_process = subprocess.Popen(
@@ -376,7 +396,8 @@ class SBSSample(Sample):
             for k, v in mutations.items():
                 mutations[k] = np.array(v).astype(SBSSample.type_map[k])
 
-            mutations['weight']*=sample_weight
+            if not sample_weight is None:
+                mutations['weight']*=sample_weight
 
             if n_cluster_mutations > 0:
                 total_mutations = n_cluster_mutations + len(mutations[k])

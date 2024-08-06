@@ -2,6 +2,11 @@ $schema: https://json-schema.org/draft-06/schema#
 
 description: Configuration for formatting features for corpus
 properties:
+  assembly_name:
+    type: string
+    enum:
+    - hg19
+    - hg38
   fasta:
     description: Path to the reference genome fasta file
     type: string
@@ -21,13 +26,6 @@ properties:
   window_size:
     description: Size of the window to be used for formatting features
     type: integer
-  chr_prefix:
-    description: Prefix for the chromosome names
-    type: string
-    default: ""
-  weight_col:
-    description: Column to use for the weights
-    type: string
   corpus_name:
     description: Name of the corpus
     type: string
@@ -35,13 +33,31 @@ properties:
     description: Data type of the features
     enum:
     - sbs
-    - fragment-motif
+    - fragment-motif-out5p
+    - fragment-motif-in5p
+    - fragment-length
     type: string
   samples:
     description: Samples to be ingested
     patternProperties:
       ^[a-zA-Z0-9_]+$:
-        type: string
+        properties:
+          url:
+            description: File location for vcf
+            type : string
+          chr_prefix:
+            description: Chr prefix
+            type : string
+          sample_weight:
+            description: How much to weight the observations from each sample
+            type: number
+          weight_col:
+            type: string
+          tumor_sample_name:
+            type: string
+        required:
+        - url
+        - sample_weight
     default: {}
   features:
     description: Features to be formatted
@@ -59,8 +75,12 @@ properties:
           affects_windows:
             description: Whether the feature affects windows, only applicable for categorical and cardinality features
             type: boolean
+          ingest_feature:
+            description: Whether to ingest the feature
+            type: boolean
+            default: true
           skip:
-            description: Whether to skip the feature
+            description: Whether to skip the feature completely
             type: boolean
             default: false
           group:
@@ -69,9 +89,10 @@ properties:
             default: all
           url:
             description: URL to download the feature file
-            type: array
+            type: [array, "null"]
             items:
               type: string
+            default: null
           type:
             description: Type of the feature
             enum:

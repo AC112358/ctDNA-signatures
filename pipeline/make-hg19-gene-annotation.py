@@ -1,9 +1,18 @@
-#!/usr/env/bin python3
+#!/bin/bash
+set -e
 
-import pandas as pd
+gtf="gencode.v46lift37.basic.annotation.gff3.gz"
+wget -O $gtf.gz https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_46/GRCh37_mapping/gencode.v46lift37.basic.annotation.gff3.gz
+gzip -d $gtf.gz
 
-genes=pd.read_csv('~/Downloads/hg19.knownCanonical.gtf', sep='\t')
-genes.columns='attributes.gene_name,chrom,strand,start,end,attributes.gene_id'.split(',')
-genes.drop_duplicates(subset='attributes.gene_id', inplace=True)
-genes[['chrom','start','end','attributes.gene_name','attributes.gene_id','strand']]\
-    .to_csv('hg19.gene.annotation.bed', sep='\t', index=None)
+query-gtf \
+    --is-gff \
+    -i $gtf \
+    -type transcript \
+    -attr tag \
+    -vals MANE_Select \
+    --contains \
+    --header \
+    -f "{chrom}\t{start}\t{end}\t{attributes[gene_name]}\t{attributes[gene_id]}\t{strand}\n"
+
+rm $gtf

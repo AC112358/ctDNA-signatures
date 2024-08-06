@@ -2,10 +2,11 @@
 import pandas as pd
 import sys
 import argparse
+from statistics import mean
 
-def main(output=sys.stdout,*,
-        encode_quantification_file,
-        curated_genes_file,
+def main(curated_genes_file,
+        encode_quantification_files,
+        output=sys.stdout,
         ):
     
     # read and reformate the quantification file
@@ -13,9 +14,14 @@ def main(output=sys.stdout,*,
     gene_annotation.columns = [x.strip('#').removeprefix('attributes.') for x in gene_annotation.columns]
     gene_annotation.gene_id = gene_annotation.gene_id.str.split('.').str[0]
 
-    quantifications = pd.read_csv(encode_quantification_file, sep = '\t')
-    quantifications.gene_id = quantifications.gene_id.str.split('.').str[0]
+    quantifications=[]
+    for quantfile in encode_quantification_files:
+        _quant = pd.read_csv(quantfile, sep = '\t')
+        _quant.gene_id = _quant.gene_id.str.split('.').str[0]
+        quantifications.append(_quant)
     #quantifications.transcript_id = quantifications.transcript_id.str.split('.').str[0]
+
+    quantifications=pd.concat(quantifications, axis=0).groupby('gene_id')['pme_TPM'].mean().reset_index()
 
     gene_annotation = gene_annotation.merge(
         quantifications[['gene_id','pme_TPM']], 
@@ -42,7 +48,7 @@ def main(output=sys.stdout,*,
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--encode-quantification-file','-quant', type=str, required=True)
+    parser.add_argument('--encode-quantification-files','-quant',nargs="+", type=str, required=True)
     parser.add_argument('--curated-genes-file','-genes', type=str, required=True)
     parser.add_argument('--output','-o', type=argparse.FileType('w'), default=sys.stdout)
     args = parser.parse_args()

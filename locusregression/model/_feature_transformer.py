@@ -130,6 +130,7 @@ class FeatureTransformer:
                 _assemble_matrix(self.feature_names_, state.features)
             )
         else:
+            #raise NotImplementedError("This path should not be used...")
             return vstack([
                 self.transformers_[corpus_name].transform(
                     _assemble_matrix(self.feature_names_, corpus_state.features)
@@ -160,7 +161,11 @@ class CardinalityTransformer(BaseEstimator):
         for corpus_state in corpus_states.values():
             assert all([f in corpus_state.feature_names for f in self.feature_names_])
 
-        matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
+        assert len(corpus_states) == 1
+
+    
+        _, state = next(iter(corpus_states.items()))
+        matrix = _assemble_matrix(self.feature_names_, state.features)
         #matrix = matrix.values
         
         #transformed_matrix = array([

@@ -336,7 +336,11 @@ class ModelState:
         logger.debug(f"design_matrix: {design_matrix.shape}; eta: {eta.shape}; target: {target.shape}") ## sandra 
         eta = design_matrix.dot(eta); target = design_matrix.dot(target) ## sandra;  dimension mismatch error occurred here since cardinality_dim of motif is 1 
 
-        m = (target/eta).mean()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            
+            m = np.nanmean(target/eta)
+
         sample_weights = eta * m
 
         return target, sample_weights
@@ -352,10 +356,14 @@ class ModelState:
 
             target, sample_weights = self._get_tau_targets(k, sstats, corpus_states, design_matrix)
 
+            # remove 0 entries - unseen combinations of strand effects
+            zero_mask = ~np.isclose(sample_weights, 0.)
+            target=target[zero_mask]; sample_weights=sample_weights[zero_mask]
+
             _tau[k] = np.exp(
                 self.cardinality_models[k]\
                 .fit(
-                    X,
+                    X[zero_mask],
                     target/sample_weights,
                     sample_weight=sample_weights/sample_weights.mean()
                 ).coef_[:self.cardinality_features_dim]

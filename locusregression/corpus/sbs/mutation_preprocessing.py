@@ -18,13 +18,17 @@ logger = logging.getLogger(' Mutation preprocessing')
 def get_passed_SNVs(vcf_file, query_string, 
                     output=subprocess.PIPE,
                     filter_string=None,
-                    sample=None,):
+                    pass_only=True,
+                    sample=None,
+                    ):
     
     filter_basecmd = [
         'bcftools','view',
-        '-f','PASS',
         '-v','snps'
     ]
+
+    if pass_only:
+        filter_basecmd += ['-f','PASS']
     
     if not sample is None:
         filter_basecmd += ['-s', sample]
@@ -144,7 +148,8 @@ def unstack_bed12_file(
 
 def get_marginal_mutation_rate(genome_file, output, *vcf_files, 
                                smoothing_size=20000,
-                               chr_prefix=''
+                               chr_prefix='',
+                               pass_only=True,
                               ):
     
     query_str = f'{chr_prefix}%CHROM\t%POS0\t%POS0\n'
@@ -163,7 +168,7 @@ def get_marginal_mutation_rate(genome_file, output, *vcf_files,
         with tempfile.TemporaryDirectory() as tempdir:
             for vcf_file in tqdm.tqdm(vcf_files, desc='Filtering VCFs', ncols = 100):
                 with open(os.path.join(tempdir, os.path.basename(vcf_file)), 'w') as f:
-                        get_passed_SNVs(vcf_file, query_str, output=f).communicate()
+                        get_passed_SNVs(vcf_file, query_str, pass_only=pass_only, output=f).communicate()
 
             processed_vcfs = [os.path.join(tempdir, v) for v in os.listdir(tempdir)]
 
@@ -182,16 +187,20 @@ def get_marginal_mutation_rate(genome_file, output, *vcf_files,
                 )
 
         logger.info('Calculating total mutations...')
-        total_mutations = int(
+        
+        total_mutations, num_regions = \
             subprocess.check_output(
-                ['awk','-v','OFS="\t"', '{sum += $13} END {print sum}', coverage_file.name]
-            ).decode('utf-8').strip()
-        )
+                ['awk','{sum += $13} END {print sum, NR}', coverage_file.name]
+            ).decode('utf-8').strip().split(' ')
+        
+        total_mutations=int(total_mutations); num_regions=int(num_regions)
+        total_mutations+=num_regions
 
+        logger.info(f'Piled up {total_mutations} total mutations across {num_regions} regions.')
         logger.info('Writing output ...')
         with open(bed12.name, 'w') as f:
             subprocess.check_call(
-                ['awk','-v','OFS=\t', f'{{print $1,$2,$3,$4,$13/{total_mutations},$6,$7,$8,$9,$10,$11,$12}}', coverage_file.name],
+                ['awk','-v','OFS=\t', f'{{print $1,$2,$3,$4,($13+1)/{total_mutations},$6,$7,$8,$9,$10,$11,$12}}', coverage_file.name],
                 stdout = f,
             )
 
@@ -201,13 +210,15 @@ def get_marginal_mutation_rate(genome_file, output, *vcf_files,
 
 def get_local_mutation_rate(mutation_rate_bedgraph, vcf_file, output, 
                             smoothing_distance=15000,
-                            chr_prefix=''):
+                            chr_prefix='',
+                            pass_only=True,
+                            ):
     '''
     bedfile : a bed file of genomic regions, and the score column should be the *normalized* mutation rate
     '''
 
     #1. get SNP positions that passed QC
-    query_process = get_passed_SNVs(vcf_file, f'{chr_prefix}%CHROM\t%POS0\t%POS0' + '\n')
+    query_process = get_passed_SNVs(vcf_file, f'{chr_prefix}%CHROM\t%POS0\t%POS0' + '\n', pass_only=pass_only)
 
     #2. define a window around each SNV
     slop_process = subprocess.Popen(
@@ -280,6 +291,7 @@ def get_local_mutation_rate(mutation_rate_bedgraph, vcf_file, output,
 def get_rainfall_statistic(mutation_rate_bedgraph, vcf_file, output, 
                            smoothing_distance=15000,
                            chr_prefix='chr',
+                           pass_only=True,
                           ):
 
 
@@ -291,7 +303,8 @@ def get_rainfall_statistic(mutation_rate_bedgraph, vcf_file, output,
             get_local_mutation_rate(
                 mutation_rate_bedgraph, vcf_file, f, 
                 smoothing_distance=smoothing_distance,
-                chr_prefix=chr_prefix
+                chr_prefix=chr_prefix,
+                pass_only=pass_only,
             )
 
         #2. Compute the distance to the nearest mutation for each mutation
@@ -398,6 +411,7 @@ def _cluster_mutations(mutations_df,
 def get_mutation_clusters(mutation_rate_bedgraph, vcf_file,
                            smoothing_distance=15000,
                            chr_prefix='chr',
+                           pass_only=True,
                            alpha = 0.005,
                            AF_tol = 0.1,
                            sample=None,
@@ -427,14 +441,17 @@ def get_mutation_clusters(mutation_rate_bedgraph, vcf_file,
                 mutation_rate_bedgraph, vcf_file, f, 
                 smoothing_distance=smoothing_distance,
                 chr_prefix=chr_prefix,
+                pass_only=pass_only,
             )
 
 
         # 2. get the mutation type and allele frequency
         #    from the VCF file
-        query_process = get_passed_SNVs(vcf_file,
-                        f'{chr_prefix}%CHROM\t%POS0\t%POS0\t%REF>%ALT\n',
-                        )
+        query_process = get_passed_SNVs(
+                            vcf_file,
+                            f'{chr_prefix}%CHROM\t%POS0\t%POS0\t%REF>%ALT\n',
+                            pass_only=pass_only
+                            )
         
         # 3. intersect the rainfall statistics with the mutation type and allele frequency
         #    The output columns will be 1) chr 2) start 3) end 4) local mutation rate 5) rainfall distance

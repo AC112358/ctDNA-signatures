@@ -144,8 +144,14 @@ class CardinalityTransformer(BaseEstimator):
     def fit(self, corpus_states):
         example_features = next(iter(corpus_states.values())).features
         self.feature_names_ = list([f for f in example_features.keys() if example_features[f]['type'] == 'cardinality'])
-        logger.info(f'Found cardinality features: {", ".join(self.feature_names_)}')
-        self.transformer_ = LabelEncoder().fit(['-','.','+'])
+
+        logger.info(
+            f'Found cardinality features: {", ".join(self.feature_names_)}'
+        )
+        
+        # theres actually no fitting to be done.
+        #self.transformer_ = LabelEncoder(classes=['-','.','+']).fit(['-','.','+'])
+        
         return self
     
 
@@ -154,15 +160,14 @@ class CardinalityTransformer(BaseEstimator):
         for corpus_state in corpus_states.values():
             assert all([f in corpus_state.feature_names for f in self.feature_names_])
 
-        #matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
+        matrix, _ = _assemble_matrix(self.feature_names_, corpus_states)
         #matrix = matrix.values
-        matrix=pd.concat([
-            _assemble_matrix(self.feature_names_, corpus_state.features)
-            for corpus_state in corpus_states.values()
-        ]).values
         
-        transformed_matrix = array([
-            self.transformer_.transform(matrix[:,col]) - 1
-            for col in range(matrix.shape[1])
-        ]).T
+        #transformed_matrix = array([
+        #    self.transformer_.transform(matrix[:,col]) - 1
+        #    for col in range(matrix.shape[1])
+        #]).T
+        conversion_dict={'+' : 1, '-' : -1, '.' : 0}
+        transformed_matrix=matrix.map(lambda x : conversion_dict[x]).values
+
         return transformed_matrix

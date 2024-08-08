@@ -449,6 +449,7 @@ class LocusRegressor:
             inner_corpus_states = {
                 name : state.subset_corpusstate(inner_corpus.get_corpus(name), update_loci)
                 for name, state in self.corpus_states.items()
+                if name in inner_corpus.corpus_names
             }
         else:
             inner_corpus_states = self.corpus_states

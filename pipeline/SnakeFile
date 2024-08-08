@@ -13,6 +13,14 @@ def scale_by_attempt(base_mb):
         return base_mb*attempt
     return _scale_by_attempt
 
+
+def hunt_for_hash(l, key):
+    for _l in l:
+        if str(hash(_l))==key:
+            return _l
+    else:
+        raise KeyError(f'Key {key} not found in list')
+
 #configfile: "config.yaml"
 validate(config, 'config.schema.yaml')
 
@@ -27,7 +35,14 @@ FEATURE_TYPE_PARAMS = {
     'cardinality' : ['column'],
 }
 TRANSCRIPTION_INFO="{corpus_name}/transcription-info.bed"
-   
+
+
+def is_null_url(url):
+    return url is None
+
+for feature_name, feature_config in config['features'].items():
+    if is_null_url(feature_config['url']) and not feature_config['skip']:
+        raise ValueError(f'A URL for feature={feature_name} has not been given. Provide a URL or set the "skip".')
 
 def get_feature_config(wildcards):
     c = config['features'][wildcards.feature_name]
@@ -67,8 +82,9 @@ rule all:
 
 rule collect:
     input:
-        [f"{{corpus_name}}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() if not config['features'][feature_name]['skip']] + \
-        [f"{{corpus_name}}/.added_samples/{sample_name}.txt" for sample_name in config['samples'].keys()]
+        [f"{{corpus_name}}/.added_features/{feature_name}.txt" for feature_name in config['features'].keys() \
+            if config['features'][feature_name]['ingest_feature'] and not config['features'][feature_name]['skip']] + \
+        [f"{{corpus_name}}/.added_samples/{sample_id}.txt" for sample_id in config['samples'].keys()]
     output:
         touch("{corpus_name}/DONE.txt")
 
@@ -81,11 +97,12 @@ rule test_submission:
     shell:
         'echo "Success!" > {output}'
 
+
 rule download_gene_quant:
     output:
-        temp("{corpus_name}/downloads/gene_quantification.bed")
+        temp("{corpus_name}/downloads/gene_quantification.{idx}.bed")
     params:
-        url=config['transcription']
+        url=lambda w : config['transcription'][int(w.idx)] #hunt_for_hash(config['transcription'], w.hash)
     resources:
         mem_mb=512,
         runtime=60
@@ -97,7 +114,7 @@ rule download_gene_quant:
 
 rule join_gene_quant:
     input:
-        rules.download_gene_quant.output
+        [f"{{corpus_name}}/downloads/gene_quantification.{idx}.bed" for idx,_ in enumerate(config['transcription'])]
     output:
         temp(TRANSCRIPTION_INFO)
     params:
@@ -136,8 +153,8 @@ def get_features_for_making_windows(wilcards):
     return [
         get_ingestion_input_filename(feature_name) 
         for feature_name, feature_config in config['features'].items()
-        if ('affects_windows' in feature_config and feature_config['affects_windows']) \
-            or (feature_config['type'] in ('categorical', 'cardinality') and not 'affects_windows' in feature_config)
+        if not feature_config['skip'] and (('affects_windows' in feature_config and feature_config['affects_windows']) \
+            or (feature_config['type'] in ('categorical', 'cardinality') and not 'affects_windows' in feature_config))
     ]
 
 rule get_regions:
@@ -150,6 +167,7 @@ rule get_regions:
         report='{corpus_name}/regions_report.txt',
     params:
         window_size=config['window_size'],
+        min_windowsize=config['min_window_size'],
     resources:
         mem_mb=scale_by_attempt(10000),
         runtime=scale_by_attempt(60)
@@ -163,6 +181,7 @@ rule get_regions:
             --blacklist-file {input.blacklist} \
             --genome-file {input.chromsizes} \
             --categorical-features {input.categorical_features} \
+            --min-windowsize {params.min_windowsize} \
             --output {output.regions} 2> {log} > {output.report}
         """
 
@@ -259,7 +278,7 @@ def get_ingestion_params(wildcards):
         paramstr+=' --genome-file ' + config['chromsizes']
     
     if feature_config['type'] in ('bedgraph','bigwig'):
-        paramstr+=' --extend ' + str(config['window_size']//2)
+        paramstr+=' --extend ' + str(config['window_size'])
 
     return paramstr
 
@@ -278,6 +297,7 @@ rule ingest_feature:
         runtime=scale_by_attempt(60),
     threads: 1
     conda: "locusregression"
+    envmodules: "ucsc-tools/363"
     log: '{corpus_name}/logs/ingest_feature/{feature_name}.log'
     shell:
         """
@@ -291,12 +311,12 @@ rule ingest_feature:
 mutrate_filename=CORPUS_NAME + '.mutrate.bedgraph'
 rule get_background_mutrate:
     input:
-        samples=[filename for filename in config['samples'].values()],
+        samples=[samp['url'] for samp in config['samples'].values()],
         chromsizes=config['chromsizes'],
     output:
         temp(mutrate_filename)
     params:
-        chr_prefix=config['chr_prefix']
+        chr_prefix='chr'
     resources:
         mem_mb=2000,
         runtime=30,
@@ -312,11 +332,25 @@ rule get_background_mutrate:
             --output {output} 2> {log}
         """
 
+def get_sample_confg(wildcards):
+    return config['samples'][wildcards.sample_id]
+
 def get_sample_filename(wildcards):
-    return config['samples'][wildcards.sample_name]
+    return get_sample_confg(wildcards)['url']
 
 def get_sample_group(wildcards, num_per_group=50):
-    return f"samples.{list(config['samples'].keys()).index(wildcards.sample_name) // num_per_group}"
+    return f"samples.{list(config['samples'].keys()).index(wildcards.sample_id) // num_per_group}"
+
+def conditional_param(param_name):
+
+    def get_cparam(wildcards):
+        sample_config =  get_sample_confg(wildcards)
+        if param_name in sample_config:
+            return f'--{param_name.replace("_","-")} {sample_config[param_name]} '
+        else:
+            return ""
+    return get_cparam
+
 
 rule ingest_sample:
     input:
@@ -325,24 +359,27 @@ rule ingest_sample:
         fasta=config['fasta'],
         background_mutation_rate=lambda w : CORPUS_NAME + '.mutrate.bedgraph',
     output:
-        temp("{corpus_name}/.added_samples/{sample_name}.txt")
+        touch("{corpus_name}/.added_samples/{sample_id}.txt")
     params:
-        chr_prefix=config['chr_prefix'],
-        weight_col='--weight-col ' + config['weight_col'] if 'weight_col' in config else '',
+        chr_prefix=conditional_param('chr_prefix'),
+        weight_col=conditional_param('weight_col'),
+        sample_weight=conditional_param('sample_weight'),
+        tumor_sample_name=conditional_param('tumor_sample_name'),
     group:
         get_sample_group
     resources:
-        mem_mb=scale_by_attempt(1000),
-        runtime=scale_by_attempt(5),
+        mem_mb=scale_by_attempt(2000),
+        runtime=scale_by_attempt(10),
     threads: 1
     conda: "locusregression"
-    log: '{corpus_name}/logs/ingest_sample/{sample_name}.log'
+    log: '{corpus_name}/logs/ingest_sample/{sample_id}.log'
     shell:
         """
         locusregression corpus-ingest-sample \
             {input.corpus} \
             {input.sample_file} \
-            --sample-name {wildcards.sample_name} \
+            --sample-id {wildcards.sample_id} \
             --mutation-rate-bedgraph {input.background_mutation_rate} \
-            {params.weight_col} -fa {input.fasta} 2> {log}
+            {params.weight_col}{params.chr_prefix}{params.sample_weight}{params.tumor_sample_name}-fa {input.fasta} \
+            2> {log}
         """

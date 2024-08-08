@@ -41,6 +41,7 @@ def get_marginal_mutation_rate_wrapper(*,
             genome_file, 
             output,
             smoothing_size,
+            PASS=False,
         ):
     
     get_marginal_mutation_rate(
@@ -48,7 +49,8 @@ def get_marginal_mutation_rate_wrapper(*,
         output,
         *vcf_files,
         smoothing_size=smoothing_size,
-        chr_prefix=chr_prefix
+        chr_prefix=chr_prefix,
+        pass_only=PASS
     )
 
 prep_mutrate_parser = subparsers.add_parser('preprocess-estimate-mutrate', help = 'Calculate the marginal mutation rate across all samples for some corpus.')
@@ -57,17 +59,19 @@ prep_mutrate_parser.add_argument('--chr-prefix', default='', help = 'Prefix to a
 prep_mutrate_parser.add_argument('--smoothing-size', type = posint, default=20000, help = 'Size of window to smooth mutation rate over.')
 prep_mutrate_parser.add_argument('--genome-file','-g', type = file_exists, required=True, help = 'Also known as a "Chrom sizes" file.')
 prep_mutrate_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout)
+prep_mutrate_parser.add_argument('--PASS','-PASS', default=False, action='store_true')
 prep_mutrate_parser.set_defaults(func = get_marginal_mutation_rate_wrapper)
 
 
 
-def get_mutation_clusters_wrapper(*,vcf_file, output, chr_prefix, sample, mutation_rate_bedgraph):
+def get_mutation_clusters_wrapper(*,vcf_file, output, chr_prefix, sample, mutation_rate_bedgraph, PASS):
     
     mutations_df = get_mutation_clusters(
         mutation_rate_bedgraph=mutation_rate_bedgraph,
         vcf_file=vcf_file,
         chr_prefix=chr_prefix,
         sample=sample,
+        pass_only=PASS,
     )
 
     transfer_annotations_to_vcf(
@@ -89,6 +93,7 @@ cluster_mutations_parser.add_argument('--mutation-rate-bedgraph','-m', type = fi
 cluster_mutations_parser.add_argument('--output','-o', type = argparse.FileType('w'), help = 'Where to save clustered VCF file.')
 cluster_mutations_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 cluster_mutations_parser.add_argument('--sample','-s', type = str, default=sys.stdout, help = 'Sample name to filter mutations by.')
+cluster_mutations_parser.add_argument('--PASS','-PASS', default=False, action='store_true', help='Only used variants annotated with `PASS`')
 cluster_mutations_parser.set_defaults(func = get_mutation_clusters_wrapper)
 
 
@@ -104,6 +109,7 @@ make_windows_parser.add_argument('--categorical-features','-cf', nargs='+', type
                                  help = 'List of categorical feature bedfiles to account for while making windows.')
 make_windows_parser.add_argument('--output','-o', type = argparse.FileType('w'), default=sys.stdout, 
                                  help = 'Where to save windows.')
+make_windows_parser.add_argument('--min-windowsize', '-min', type=int, default=50)
 make_windows_parser.set_defaults(func = make_windows_wrapper)
 
 
@@ -131,7 +137,6 @@ corpus_init_parser.add_argument('--corpus-name','-n', type = str, required = Tru
 corpus_init_parser.add_argument('--fasta-file','-fa', type = file_exists, required = True, help = 'Sequence file, used to find context of mutations.')
 corpus_init_parser.add_argument('--regions-file','-r', type = file_exists, required = True)
 corpus_init_parser.add_argument('--dtype', type = str, default='sbs', choices=['sbs','fragment-motif-in5p','fragment-motif-out5p','fragment-length','indel',])
-corpus_init_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify make a corpus for in or out fragments.')
 corpus_init_parser.set_defaults(func = create_corpus_wrapper)
 
 
@@ -414,7 +419,7 @@ def process_distance_feature(
         write_feature(
             h5_object,
             group = group,
-            type = normalization,
+            type = 'minmax',
             name = f'{feature_name}_progressBetween',
             values = progress_between,
         )
@@ -422,7 +427,7 @@ def process_distance_feature(
         write_feature(
             h5_object,
             group = group,
-            type = normalization,
+            type = 'quantile',
             name = f'{feature_name}_interFeatureDistance',
             values = interdistance,
         )
@@ -492,15 +497,17 @@ cardinality_sub.set_defaults(func = partial(process_discrete,
                             )
 
 def ingest_sample(mutation_rate_bedgraph=None,
-                  sample_name=None,
+                  sample_id=None,
+                  tumor_sample_name=None,
                   weight_col=None,
                   chr_prefix='',
-                  sample_weight=1.,
+                  sample_weight=None,
+                  PASS=False,
                   *,corpus, sample_file, fasta_file
                 ):
     
-    if sample_name is None:
-        sample_name = os.path.basename(sample_file)
+    if sample_id is None:
+        sample_id = os.path.basename(sample_file)
 
     if mutation_rate_bedgraph is None:
         logger.warning('No mutation rate bedgraph provided, will not filter for clustered variants.')
@@ -516,22 +523,26 @@ def ingest_sample(mutation_rate_bedgraph=None,
             weight_col = weight_col,
             mutation_rate_file = mutation_rate_bedgraph,
             sample_weight=sample_weight,
+            sample_name=tumor_sample_name,
+            pass_only=PASS
         )
     
-    sample.name = sample_name
-    logger.info(f'Sample ingestion done with {sample_name}')
+    sample.name = sample_id
+    logger.info(f'Sample ingestion done with {sample_id}')
     with buffered_writer(corpus) as h5_object:
-        write_sample(h5_object, sample, sample_name)
+        write_sample(h5_object, sample, sample_id)
 
 ingest_sample_parser = subparsers.add_parser('corpus-ingest-sample', help = 'Ingest a sample into a corpus.')
 ingest_sample_parser.add_argument('corpus', type = file_exists, help = 'Path to compiled corpus file.')
 ingest_sample_parser.add_argument('sample-file', type = file_exists, help = 'VCF file of mutations.')
-ingest_sample_parser.add_argument('--sample-name','-name', type = str, default=None, help = 'Name of sample, defaults to filename.')
+ingest_sample_parser.add_argument('--sample-id','-id', type = str, default=None, help = 'ID of sample for use in locusVI, defaults to filename.')
 ingest_sample_parser.add_argument('--weight-col','-w', type = str, default=None, help = 'Column in INFO field to use as weight.')
 ingest_sample_parser.add_argument('--mutation-rate-bedgraph','-m', type = file_exists, default=None, help = 'Bedgraph file of mutation rates.')
 ingest_sample_parser.add_argument('--chr-prefix', default='', help = 'Prefix to append to chromosome names in VCF files.')
 ingest_sample_parser.add_argument('--fasta-file','-fa', type = file_exists, required=True, help = 'Sequence file, used to find context of mutations.')
-ingest_sample_parser.add_argument('--sample-weight','-sw', type = posfloat, default=1., help = 'Weight to assign to sample.')
+ingest_sample_parser.add_argument('--sample-weight','-sw', type = posfloat, default=None, help = 'Weight to assign to sample.')
+ingest_sample_parser.add_argument('--tumor-sample-name','-tumor', type = str, default=None, help = 'Sometimes, a VCF will have multiple samples stored within it. Set this flag to the sample name under which tumor AF metrics can be accessed.')
+ingest_sample_parser.add_argument('--PASS','-PASS', default=False, action='store_true')
 ingest_sample_parser.set_defaults(func = ingest_sample)
 
 
@@ -723,7 +734,6 @@ model_options.add_argument('--batch-size','-batch', type = posint, default = 128
 model_options.add_argument('--empirical-bayes','-eb', action = 'store_true', default=False,)
 model_options.add_argument('--pi-prior', '-pi', type = posfloat, default = 1.,
     help = 'Dirichlet prior over sample mixture compositions. A value > 1 will give more dense compositions, which <1 finds more sparse compositions.')
-model_options.add_argument('--n-jobs', '-j', type = posint, default=1)
 tune_sub.set_defaults(func = create_study)
 
 
@@ -736,7 +746,7 @@ trial_parser = subparsers.add_parser('study-run-trial', help='Run a single trial
 trial_parser.add_argument('study-name',type = str)
 trial_parser.add_argument('--storage','-s', type = str, default=None)
 trial_parser.add_argument('--iters','-i', type = posint, default=1)
-trial_parser.add_argument('--n-jobs', '-j', type = posint, default=1)
+#trial_parser.add_argument('--n-jobs', '-j', type = posint, default=1)
 trial_parser.set_defaults(func = wraps_run_trial)
 
 
@@ -838,7 +848,7 @@ def train_model(
 
     basemodel = get_basemodel(model_type)
     if model_type=='gbt':
-        model_params={'max_trees_per_iter': max_trees_per_iter, 'l2_regularization': l2_regularization}
+        model_params={'max_trees_per_iter': max_trees_per_iter}
         
     model = basemodel(
         fix_signatures=fix_signatures,
@@ -949,7 +959,6 @@ score_parser.add_argument('model', type = file_exists)
 score_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
 score_parser.add_argument('--subset-by-loci', action = 'store_true', default=False)
-score_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 score_parser.set_defaults(func = score)
 
 
@@ -967,7 +976,6 @@ predict_sub = subparsers.add_parser('model-predict-exposures', help = 'Predict e
 predict_sub.add_argument('model', type = file_exists)
 predict_sub.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
                          help = 'Path to compiled corpus file/files.')
-predict_sub.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 predict_sub.add_argument('--output','-o', type =  valid_path, required=True)
 predict_sub.set_defaults(func = predict)
 
@@ -1019,7 +1027,6 @@ mutrate_r2_parser = subparsers.add_parser('model-mutation-rate-r2',
 mutrate_r2_parser.add_argument('model', type = file_exists)
 mutrate_r2_parser.add_argument('--corpuses', '-d', type = file_exists, nargs = '+', required=True,
     help = 'Path to compiled corpus file/files.')
-mutrate_r2_parser.add_argument('--in-corpus','-i', action = 'store_true', default=False, help = 'Specify model trained for in5p or out5p motifs (by default it assumes model was trained for out5p motifs).')
 mutrate_r2_parser.set_defaults(func = get_mutation_rate_r2)
 
 

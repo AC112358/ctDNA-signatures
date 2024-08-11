@@ -105,6 +105,11 @@ class LengthSample(Sample):
             frag_end = int(fields[6])
             length = frag_end - frag_start
 
+            gcbias = float(fields[8])
+            if gcbias < 0.2:
+                gcbias = 0.2
+            weight = 1 / gcbias
+
             for min_length, max_length in LENGTH_BINS:
                 if min_length <= length < max_length:
                     mutation_idx = MUTATION_IDX[(min_length, max_length)]
@@ -118,7 +123,7 @@ class LengthSample(Sample):
                 'mutation': mutation_idx,
                 'context': 0,  # Only one context
                 'attribute': 0,
-                'weight': 1,
+                'weight': weight,
                 'pos': frag_start,
                 'cardinality': 0
             }

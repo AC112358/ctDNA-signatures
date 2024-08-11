@@ -103,7 +103,7 @@ class LengthSample(Sample):
             locus_idx = int(fields[3])
             frag_start = int(fields[5])
             frag_end = int(fields[6])
-            length = frag_end - frag_start + 1
+            length = frag_end - frag_start
 
             for min_length, max_length in LENGTH_BINS:
                 if min_length <= length < max_length:

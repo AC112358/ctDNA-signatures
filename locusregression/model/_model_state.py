@@ -152,7 +152,9 @@ class ModelState:
         else:
             self.strand_transformer = None
 
-
+    
+    def register_new_corpus(self, corpus_name, corpus_state):
+        self.feature_transformer = self.feature_transformer.partial_fit(corpus_name, corpus_state)
 
     @property
     def lambda_(self):

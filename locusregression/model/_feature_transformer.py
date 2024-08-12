@@ -97,6 +97,14 @@ class FeatureTransformer:
             remainder='passthrough',
             verbose_feature_names_out=False,
         )
+    
+
+    def partial_fit(self, corpus_name, corpus_state):
+        base_transformer = next(iter(self.transformers_.values()))
+        matrix = _assemble_matrix(self.feature_names_, corpus_state.features)
+        self.transformers_[corpus_name] = clone(base_transformer).fit(matrix)
+
+        return self
 
 
     def fit(self, corpus_states):
@@ -137,8 +145,11 @@ class FeatureTransformer:
                 )
                 for corpus_name, corpus_state in corpus_states.items()
             ])
+        
+    def assemble_matrix(self, corpus_states):
+        assert len(corpus_states) == 1, 'Only one corpus state can be assembled at a time'
+        return _assemble_matrix(self.feature_names_, next(iter(corpus_states.values())).features)
     
-
 
 class CardinalityTransformer(BaseEstimator):
 

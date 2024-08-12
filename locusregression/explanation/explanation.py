@@ -59,5 +59,5 @@ def explain(
         shap_values,
         X_tild, 
         feature_names,
-        model.model_state.feature_transformer.assemble_matrix(corpus_states)[0][feature_names].values,
+        model.model_state.feature_transformer.assemble_matrix(corpus_states)[feature_names].values,
     )

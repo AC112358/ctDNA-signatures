@@ -605,6 +605,26 @@ split_parser.add_argument('--seed', '-s', type = posint, default=0)
 split_parser.set_defaults(func = split_corpus)
 
 
+def extract_outliers(*, corpus, inliers_output, outliers_output):
+
+    corpus = load_corpus(corpus)
+    inliers, outliers = corpus.extact_outlier_corpus()
+    
+    logger.info(f'Found {len(corpus) - len(inliers)} outlier samples.')
+    save_corpus(inliers, inliers_output)
+
+    if not (outliers is None or outliers_output is None):
+        logger.info('Not saving outlier corpus.')
+        save_corpus(outliers, outliers_output)
+
+outliers_parser = subparsers.add_parser('corpus-extract-outliers', help='Use the IsolationForest model to find samples with weird signatures, and put those into their own corpus.')
+outliers_parser.add_argument('corpus', type = file_exists)
+outliers_parser.add_argument('--inliers-output','-io', type=valid_path, required=True)
+outliers_parser.add_argument('--outliers-output','-oo', type=valid_path)
+outliers_parser.set_defaults(func=extract_outliers)
+
+
+
 def empirical_mutation_rate(*,corpus, output, no_weight=True, no_subclonal=False):
 
     with _get_regions_filename(corpus) as regions_file:
@@ -746,6 +766,7 @@ trial_parser = subparsers.add_parser('study-run-trial', help='Run a single trial
 trial_parser.add_argument('study-name',type = str)
 trial_parser.add_argument('--storage','-s', type = str, default=None)
 trial_parser.add_argument('--iters','-i', type = posint, default=1)
+trial_parser.add_argument('--save-model', type=valid_path, default=None)
 #trial_parser.add_argument('--n-jobs', '-j', type = posint, default=1)
 trial_parser.set_defaults(func = wraps_run_trial)
 

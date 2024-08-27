@@ -1,7 +1,6 @@
 from collections import defaultdict
 
-
-def sorted_iterator(iter):
+def sorted_iterator(iter, key = lambda x : x):
     # this is a generator that yields the next item in the iterator, 
     # but raises a ValueError if the items are not in order
     for curr in iter:
@@ -11,9 +10,9 @@ def sorted_iterator(iter):
         except UnboundLocalError:
             _prev = curr
         else:
-            if not curr >= _prev:
-                raise ValueError('Items are out of order, {} greater than {}'\
-                        .format(str(curr), str(_prev))
+            if not key(curr) >= key(_prev):
+                raise ValueError('Items are out of order, {} should be greater than {}'\
+                        .format(str(key(curr)), str(key(_prev)))
                     )
             
             _prev = curr
@@ -71,7 +70,7 @@ class PeekIterator:
 def interleave_streams(*iterators, key = lambda x : x):
 
     streams = [
-        PeekIterator(stream)
+        PeekIterator(sorted_iterator(stream, key=key))
         for stream in iterators
     ]
 
@@ -88,7 +87,8 @@ def interleave_streams(*iterators, key = lambda x : x):
 def buffered_aggregator(
         iterator, 
         has_lapsed = lambda x, y : False, 
-        key = lambda x : x
+        key = lambda x : x,
+        order_key = lambda x : x,
     ):
     '''
     This function takes an iterator and a function that determines whether a window has lapsed
@@ -98,11 +98,21 @@ def buffered_aggregator(
     '''
     
     buffer = defaultdict(list)
+    buffer_order = {}
 
-    def get_lapsed_keys(val):
+    def get_lapsed_key(val):
         for dictkey, values in buffer.items():
-            if has_lapsed(val, values[0]):
-                yield dictkey
+            if has_lapsed(val, values[0]) \
+                    and buffer_order[dictkey] == min(buffer_order.values()):
+                return dictkey
+        else:
+            return None
+
+    def pop_lapsed_keys(val):
+        lapsed_key = get_lapsed_key(val)
+        while not lapsed_key is None:
+            yield lapsed_key
+            lapsed_key = get_lapsed_key(val)
 
     while True:
 
@@ -111,14 +121,17 @@ def buffered_aggregator(
         except StopIteration:
             break
         
-        lapsed_keys = list(get_lapsed_keys(val))
-        for dictkey in lapsed_keys:
+        for dictkey in pop_lapsed_keys(val):
+            buffer_order.pop(dictkey)
             yield buffer.pop(dictkey)
         
-        buffer[key(val)].append(val)
-
-    keys= list(buffer.keys())
-    for dictkey in keys:
+        dictkey=key(val)
+        if not dictkey in buffer:
+            buffer_order[dictkey] = order_key(val)
+        buffer[dictkey].append(val)
+        
+    for dictkey in pop_lapsed_keys(val):
+        buffer_order.pop(dictkey)
         yield buffer.pop(dictkey)
 
 

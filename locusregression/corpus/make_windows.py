@@ -6,7 +6,8 @@ from numpy import quantile
 from collections import defaultdict, Counter
 from tqdm import tqdm
 import logging
-from .peeking_sort import interleave_streams, buffered_aggregator, filter_intersection
+from itertools import chain
+from .peeking_sort import interleave_streams, buffered_aggregator, filter_intersection, sorted_iterator
 logger = logging.getLogger('Windows')
 logger.setLevel(logging.INFO)
 logging.basicConfig(level=logging.INFO)
@@ -161,13 +162,31 @@ def stream_bedfile(bedfile):
 
 def _get_endpoints(*bedfiles):
 
-    def _get_endpoints_bedfile(bedfile, track_id):
-    
+    def _iter_endpoints_bedfile(bedfile, track_id):
+        # okay the problem is that this is not current sorted ...
         for chrom, start, end, feature in stream_bedfile(bedfile):
-            yield chrom, start, track_id, feature, True
-            yield chrom, end, track_id, feature, False
+            yield chrom, start, end - start, track_id, feature, True
+            yield chrom, end, 0, track_id, feature, False
 
-    endpoints = [_get_endpoints_bedfile(bedfile, os.path.basename(bedfile)) for bedfile in bedfiles]
+    def trace(x):
+        return x
+
+    def ordered_endpoints(bedfile, track_id):
+        return map(lambda x : (x[0],x[1],x[3],x[4],x[5]),
+            chain.from_iterable(buffered_aggregator(
+                _iter_endpoints_bedfile(bedfile, track_id),
+                has_lapsed = lambda x, y : x[0] != y[0] or ( (x[1] - (y[1] + y[2])) > 0 and x[-1]),
+                key = lambda x : (x[0], x[1]),
+                order_key = lambda x : (x[0], x[1]),
+            ))
+        )
+
+    #for bedfile in bedfiles:
+    #    for a in sorted_iterator( ordered_endpoints(bedfile, 'yeah'), key = lambda x : (x[0],x[1]) ):
+    #        pass
+    #assert False
+
+    endpoints = [ordered_endpoints(bedfile, os.path.basename(bedfile)) for bedfile in bedfiles]
     
     return interleave_streams(*endpoints, key = lambda x : (x[0], x[1]))
 
@@ -256,11 +275,11 @@ def make_windows(
     min_windowsize=50,
 ):
     logger.info(f'Checking sort order of bedfiles ...')
-    for bedfile in bedfiles:
-        try:
-            subprocess.run(["sort", "-k1,1", "-k2,2n", "--check", bedfile], check=True)
-        except subprocess.CalledProcessError:
-            raise ValueError(f'Bedfile {bedfile} is not sorted by chromosome and start position.')
+    #for bedfile in bedfiles:
+    #    try:
+    #        subprocess.run(["sort", "-k1,1", "-k2,2n", "--check", bedfile], check=True)
+    #    except subprocess.CalledProcessError:
+    #        raise ValueError(f'Bedfile {bedfile} is not sorted by chromosome and start position.')
 
     allowed_chroms=[]
     with open(genome_file,'r') as f:
@@ -335,7 +354,8 @@ def make_windows(
                             ),
                         ),
                         has_lapsed = lambda x, y : x[0] != y[0] or x[1] - y[1] > window_size*2,
-                        key = lambda x : x[3]
+                        key = lambda x : x[3],
+                        order_key = lambda x : (x[0], x[1]),
                     )))))):
             print(*bed12_record, sep='\t', file=output)  
 

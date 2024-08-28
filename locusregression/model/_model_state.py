@@ -1,7 +1,7 @@
 
 import numpy as np
 from ._dirichlet_update import update_alpha
-from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS, OUT5P_SIGS, LEN_SIGS
+from ..simulation import SimulatedCorpus, COSMIC_SIGS, IN5P_SIGS, OUT5P_SIGS, LEN_SIGS, MUSICAL_SIGS
 from sklearn.linear_model import PoissonRegressor
 from scipy.special import logsumexp
 from sklearn.preprocessing import OneHotEncoder
@@ -187,6 +187,15 @@ class ModelState:
                     raise ValueError(f'Unknown signature {sig}')
                 
                 sigmatrix = SimulatedCorpus.cosmic_sig_to_matrix(COSMIC_SIGS[sig])
+
+            if sig.startswith('MusSBS'):
+                sig=sig.removeprefix('Mus')
+                try:
+                    MUSICAL_SIGS[sig]
+                except KeyError:
+                    raise ValueError(f'Unknown signature {sig}')
+                
+                sigmatrix = SimulatedCorpus.cosmic_sig_to_matrix(MUSICAL_SIGS[sig])
                 
             elif 'out' in sig: # to fix out5p signatures, you need to specify 'out' in fix sigs name
                 try:

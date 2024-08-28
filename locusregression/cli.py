@@ -722,7 +722,8 @@ tune_required.add_argument('--min-components','-min',type = posint, required=Tru
     help= 'Maximum number of components to test for fit on dataset.')
 
 tune_optional = tune_sub.add_argument_group('Tuning arguments')
-
+tune_optional.add_argument('--train-size', '-ts', type = posfloat, default = 0.7,
+    help = 'Proportion of samples to use for training.')
 tune_optional.add_argument('--storage',type = str, default=None,
                             help = 'Address path to database to store tuning results, for example "sqlite:///tuning.db" '
                                    'or "mysql://user:password@host:port/dbname", if one is using a remote database. '

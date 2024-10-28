@@ -101,14 +101,25 @@ class LengthSample(Sample):
             fields = line.strip().split('\t')
             chrom = fields[0]
             locus_idx = int(fields[3])
-            frag_start = int(fields[5])
+            frag_start = int(fields[5]) + 1
             frag_end = int(fields[6])
-            length = frag_end - frag_start
+            length = frag_end - frag_start + 1
 
             gcbias = float(fields[8])
-            if gcbias < 0.2:
-                gcbias = 0.2
+            if gcbias != gcbias:
+                return None
+
+            if gcbias < 0.05:
+                return None
+            if gcbias < 0.25:
+                gcbias = 0.25
+            if gcbias > 4:
+                gcbias = 4
+
             weight = 1 / gcbias
+
+            if weight != weight:
+                raise WeirdMutationError(f"NaN encountered in weight calculation for line: {line.strip()}")
 
             for min_length, max_length in LENGTH_BINS:
                 if min_length <= length < max_length:
@@ -116,6 +127,7 @@ class LengthSample(Sample):
                     break
             else:
                 raise WeirdMutationError(f'Fragment length {length} not in defined bins.')
+                return None
 
             return {
                 'chrom': chrom,

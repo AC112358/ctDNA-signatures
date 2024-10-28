@@ -146,12 +146,33 @@ class MotifSampleBase(Sample):
             
             fields = line.strip().split('\t')
 
+            if len(fields) < 9:
+                return None
+
             # @Sandra: in the future, these hard-coded indices will need to be replaced with a more robust method
             # Potentially, we could start from a BAM file instead of the custom fragment file format.
             # The first four columns will be chr,start,end,locus_idx, then the rest of the columns will be from the motif file.
-            chrom=fields[0]; locus_idx=int(fields[3]); #motif=fields[-1]
-            frag_start=int(fields[5]); frag_end=int(fields[6]) 
-            
+            chrom=fields[0]
+            locus_idx=int(fields[3])
+            frag_start=int(fields[5]) + 1
+            frag_end=int(fields[6]) 
+            gcbias=float(fields[8])
+      
+            if gcbias != gcbias:
+                return None
+
+            if gcbias < 0.05:
+                return None
+            if gcbias < 0.25:
+                gcbias = 0.25
+            if gcbias > 4:
+                gcbias = 4
+
+            weight = 1 / gcbias
+
+            if weight != weight:
+                raise WeirdMutationError(f"NaN encountered in weight calculation for line: {line.strip()}")
+
             '''# Will be used later
             #gc_content = float(fields[-2])
 
@@ -179,13 +200,16 @@ class MotifSampleBase(Sample):
             else:
                 raise NotImplementedError("Only positive_file is supported")
             
+            if any(nuc not in 'ACGT' for nuc in context):
+                return None
+
             return {
                 'chrom' : chrom,
                 'locus' : locus_idx,
                 'mutation' : 0,
                 'context' : CONTEXT_IDX[context],
                 'attribute' : 0, # placeholder for now
-                'weight' : 1, # currently no support for incorporating weights -- float(weight)
+                'weight' : weight, # currently no support for incorporating weights -- float(weight)
                 'pos' : int(frag_start), # irrelevant since we merge mutations
                 'cardinality': 0 # not using cardinality for motifs
             }
@@ -263,6 +287,10 @@ class MotifSampleBase(Sample):
             
                     line_dict = process_line(line, fa, positive_file=positive_file)
                     #last_line = line
+
+                    if line_dict is None:
+                        continue
+ 
                     max_locus_processed = max(max_locus_processed, int(line_dict['locus']))
                     mutation_group_key = f"{line_dict['chrom']}:{line_dict['locus']}:{line_dict['context']}"
 

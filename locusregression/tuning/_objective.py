@@ -5,10 +5,13 @@ from ..model import _pseudo_r2
 import optuna
 from tqdm import trange
 import sys
+from os.path import abspath
 from numpy import exp
 from functools import partial
 import logging
 logger = logging.getLogger(' LocusRegressor')
+
+
 def objective(trial,
             min_components = 2, 
             max_components = 10,
@@ -18,12 +21,12 @@ def objective(trial,
             n_jobs=1,
             model_type = 'regression',
             subset_by_loci=True,
-            no_improvement=5,*,
+            no_improvement=5,
+            save_model=None,*,
             num_epochs,
             train, test,
-            ):
-    
-    
+            ):        
+
     if model_type == 'linear':
         basemodel = LocusRegressor
     elif model_type == 'gbt':
@@ -39,6 +42,11 @@ def objective(trial,
         sample_params['locus_subsample'] = trial.suggest_categorical('locus_subsample', locus_subsample_rates)
 
     model_params.update(sample_params)
+
+    if save_model:
+        model_relpath=f'{save_model}.{trial.number}.pkl'
+        model_abspath=abspath(model_relpath)
+        trial.set_user_attr('model_path',  model_abspath)
 
     print(
         'Training model with params:\n' + \
@@ -88,6 +96,9 @@ def objective(trial,
             trial.set_user_attr(f'train_mutationR2_{step}_{train_.name}', train_fn(y_hat=exp(model.get_log_marginal_mutation_rate(train_))))'''
 
         if trial.should_prune():
+            if not save_model is None:
+                model.save(model_abspath)
+
             raise optuna.TrialPruned()
 
         if len(scores) > no_improvement and not (min(scores) in scores[-no_improvement:]):
@@ -96,5 +107,7 @@ def objective(trial,
     #for train_, test_ in zip(train.corpuses, test.corpuses):
     #    trial.set_user_attr(f'test_mutationR2_{test_.name}', eval_r2_test(y_hat=exp(model.get_log_marginal_mutation_rate(test_))))
     #    trial.set_user_attr(f'train_mutationR2_{train_.name}', eval_r2_test(y_hat=exp(model.get_log_marginal_mutation_rate(train_))))
+    if not save_model is None:
+        model.save(model_abspath)
 
     return model.score(test, subset_by_loci=subset_by_loci) 

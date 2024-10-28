@@ -12,6 +12,7 @@ import logging
 from scipy.special import xlogy
 from shap import Explanation
 from seaborn import stripplot, violinplot
+from scipy.cluster.hierarchy import linkage, leaves_list
 from joblib import Parallel, delayed
 logger = logging.getLogger(' LocusRegressor')
 
@@ -917,6 +918,59 @@ class LocusRegressor:
         for spine in ax.spines.values():
             spine.set_visible(False)
 
+        return ax
+    
+    def plot_dots(self, ax=None, dot_scale=10, cmap='coolwarm', figsize=(5,5)):
+
+        if ax is None:
+            fig, ax = plt.subplots(1,1, figsize = (5,5))
+
+        def get_shap_summary_stats(shap_values, feature_values, quantile=0.9):
+            mean_deviation = np.quantile(np.abs(shap_values), quantile, axis=0)#.mean(axis=0)
+            feature_correlation = []
+            for _shap, _feature in zip(shap_values.T, feature_values.T):
+                na_mask = ~np.isnan(_feature)
+                feature_correlation.append(
+                    np.corrcoef(_shap[na_mask], _feature[na_mask])[0, 1]
+                )
+            return mean_deviation, np.array(feature_correlation)
+        rads=[]; colors=[]
+
+        for component in self.component_names:
+            _rad,_color = get_shap_summary_stats(self.explanation_shap_values_[component], self.explanation_features_)
+            rads.append(_rad); colors.append(_color)
+        
+        rads = np.array(rads); colors = np.array(colors)
+        #feature_matrix = np.nan_to_num(np.hstack([rads, colors]), 0.)
+
+        row_order = leaves_list( linkage(np.nan_to_num(rads, 0.), method='ward', optimal_ordering=True) )
+        col_order = leaves_list(linkage(np.nan_to_num(rads.T, 0.), method='ward', optimal_ordering=True))
+
+        n_dots = len(self.model_state.feature_transformer.feature_names_out)
+        n_components = len(self.component_names)
+        x_locs = np.tile(np.arange(n_dots), n_components)
+        y_locs = np.repeat(np.arange(n_components), n_dots)
+
+        ax.scatter(
+            x_locs,
+            y_locs,
+            s = rads[row_order][:, col_order].flatten()*dot_scale,
+            c = colors[row_order][:, col_order].flatten(),
+            cmap = cmap,
+        )
+        # Remove spines from all axes
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.set_yticks(np.arange(n_components))
+        ax.set_xticks(np.arange(n_dots))
+        ax.set_yticklabels(np.array(self.component_names)[row_order], fontsize=8)
+        ax.set_xticklabels(
+            np.array(self.model_state.feature_transformer.feature_names_out)[col_order],
+            rotation=90, fontsize=8
+        )
+        
         return ax
 
 

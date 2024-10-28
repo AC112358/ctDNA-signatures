@@ -7,6 +7,7 @@ from .sample import SampleLoader, InMemorySamples
 from .sbs.observation_config import SBSSample
 from .motif.observation_config import MotifSampleIn5p, MotifSampleOut5p
 from .length.observation_config import LengthSample
+from sklearn.ensemble import IsolationForest
 from pandas import DataFrame
 from tqdm import trange
 from itertools import product
@@ -197,6 +198,23 @@ class Corpus(CorpusMixin):
             name = self.name,
             regions=self.regions,
         )
+
+
+    def extact_outlier_corpus(self):
+        
+        X=np.array([sample.signature() for sample in self])
+        outlier_labels=IsolationForest(random_state=0).fit_predict(X)
+
+        use_samples=np.argwhere(outlier_labels==1)[:,0]
+        outliers=np.argwhere(outlier_labels==-1)[:,0]
+        if len(outliers)==0:
+            # no filtering needed
+            return (self, None)
+        else:
+            return (
+                self.subset_samples(use_samples), 
+                self.subset_samples(outliers)
+            )
 
 
     def subset_loci(self, loci):

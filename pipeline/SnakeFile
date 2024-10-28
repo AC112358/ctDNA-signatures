@@ -8,6 +8,13 @@ wildcard_constraints:
     idx="[0-9]+",
 
 
+def get_regions_filename(wildcards):
+    if not 'regions' in config or config['regions'] is None:
+        return f"{wildcards.corpus_name}/regions.bed"
+    else:
+        return config['regions']
+
+
 def scale_by_attempt(base_mb):
     def _scale_by_attempt(wildcards, attempt):
         return base_mb*attempt
@@ -25,7 +32,7 @@ def hunt_for_hash(l, key):
 validate(config, 'config.schema.yaml')
 
 CORPUS_NAME="{corpus_name}/corpus.h5"
-REGIONS_NAME="{corpus_name}/regions.bed"
+
 FEATURE_TYPE_PARAMS = {
     'bigwig' : ['normalization', 'extend', 'group'],
     'bedgraph' : ['normalization', 'extend', 'group'],
@@ -163,7 +170,7 @@ rule get_regions:
         chromsizes=config['chromsizes'],
         blacklist=config['blacklist']
     output:
-        regions=REGIONS_NAME,
+        regions="{corpus_name}/regions.bed",
         report='{corpus_name}/regions_report.txt',
     params:
         window_size=config['window_size'],
@@ -196,7 +203,7 @@ def get_process_input(wildcards):
     if f['type'] in ('categorical', 'cardinality'):
         input_args.append('.fakewindows.bed')
     else:
-        input_args.append(rules.get_regions.output.regions)
+        input_args.append(get_regions_filename(wildcards))
     
     for idx in range(len(f['url'])):
         input_args.append( get_download_filename(wildcards.feature_name,idx) )
@@ -240,7 +247,7 @@ rule process_resource:
 
 rule create_corpus:
     input:
-        regions=rules.get_regions.output.regions,
+        regions=get_regions_filename,
     output:
         corpus=CORPUS_NAME
     params:

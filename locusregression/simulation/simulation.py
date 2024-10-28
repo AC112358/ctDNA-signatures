@@ -41,11 +41,14 @@ def revcomp(seq):
 with open(os.path.join(os.path.dirname(__file__), 'cosmic.json'),'r') as f:
     COSMIC_SIGS = json.load(f)
 
+with open(os.path.join(os.path.dirname(__file__), 'musical_sbs.json'),'r') as f:
+    MUSICAL_SIGS = json.load(f)
+
 # IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'MSK_allreads_W_in5p_NMF_10_20_17.csv'), index_col=0) # without normalization
-IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_in5p_catalog_in_v2_fix.csv'), index_col=0) # re-unnormalized
-IN5P_SIGS = IN5P_SIGS.to_dict()
-OUT5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out5p_sparse_selected_norm_fix.csv'), index_col=0) # re-unnormalized
-OUT5P_SIGS = OUT5P_SIGS.to_dict()
+#IN5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_in5p_catalog_in_v2_fix.csv'), index_col=0) # re-unnormalized
+IN5P_SIGS = None #IN5P_SIGS.to_dict()
+#OUT5P_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'W_out5p_sparse_selected_norm_fix.csv'), index_col=0) # re-unnormalized
+OUT5P_SIGS = None #OUT5P_SIGS.to_dict()
 LEN_SIGS = pd.read_csv(os.path.join(os.path.dirname(__file__),'MSK_new_len_W_length_NMF_5_12_9_fix.csv'), index_col=0) # re-unnormalized
 LEN_SIGS.index = LEN_SIGS.index.str.replace('_', '-')
 LEN_SIGS.index = LEN_SIGS.index.str.replace('350-700', '350-701')

@@ -120,7 +120,7 @@ def load_study(study_name, storage = None, with_corpus = True):
 
 
 
-def run_trial(*,study_name, iters, storage = None, n_jobs=1):
+def run_trial(*,study_name, iters, storage = None, n_jobs=1, save_model=None):
 
     study, dataset, attrs = load_study(study_name, storage)
 
@@ -144,6 +144,7 @@ def run_trial(*,study_name, iters, storage = None, n_jobs=1):
         subset_by_loci=True,
         train = train,
         test = test,
+        save_model=save_model,
     )
 
     study.optimize(

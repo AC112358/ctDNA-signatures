@@ -170,6 +170,31 @@ class SBSSample(Sample):
     N_MUTATIONS=3
     N_ATTRIBUTES=1
 
+    def signature(self):
+        
+        context_dist = np.zeros((self.N_CONTEXTS,))
+        mutation_dist = np.zeros((self.N_CONTEXTS, self.N_MUTATIONS,))
+
+        for context_idx, mutation_idx, weight in zip(
+            self.context, self.mutation, self.weight
+        ):
+            context_dist[context_idx] += weight
+            mutation_dist[context_idx, mutation_idx] += weight
+
+        def to_cosmic_str(context, mutation):
+            return f'{context[0]}[{context[1]}>{mutation}]{context[2]}'
+
+        joint_prob = (context_dist[:,None]*mutation_dist).ravel() # CxM
+        event_name = [(to_cosmic_str(c,m),'f') if c[1] in 'TC' else (to_cosmic_str(revcomp(c), complement[m]), 'r')
+                      for c in CONTEXTS for m in MUTATIONS[c]
+                     ]
+        
+        event_prob = dict(zip(event_name, joint_prob))
+
+        fwd_events = np.array([event_prob[(event, 'f')] for event in COSMIC_SORT_ORDER])
+
+        return fwd_events
+
 
     def plot(self, ax=None, figsize=(5.5,1.25), show_strand=False,
              normalizer = None, **kwargs):

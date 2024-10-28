@@ -4,9 +4,51 @@ import tempfile
 import sys
 from numpy import quantile
 from collections import defaultdict, Counter
+from tqdm import tqdm
 import logging
+from itertools import chain
+from .peeking_sort import interleave_streams, buffered_aggregator, filter_intersection, sorted_iterator
 logger = logging.getLogger('Windows')
 logger.setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO)
+
+class RegionOverlapComparitor:
+    '''
+    Why does this class exist?
+
+    This class is used to wrap a region and change the comparison behavior of the region.
+    When wrapped, a region is equal to another region if the two regions overlap.
+    '''
+    @classmethod
+    def unwrap(cls, wrapped):
+        return wrapped.unwrap()
+
+    def __init__(self, chrom, start, end, *args):
+        self.chrom = chrom
+        self.start = start
+        self.end = end
+        self.args = args
+
+    def __gt__(self, other):
+        return self.chrom > other.chrom or \
+            (self.chrom == other.chrom and self.start > other.end)
+    
+    def __eq__(self, other):
+        '''
+        self  ____
+        other   ____
+
+        self      ____
+        other  ____
+        '''
+        return self.chrom == other.chrom and \
+                    (self.end >= other.start and self.start <= other.end)
+    
+    def __ge__(self, other):
+        return (self > other) or (self == other)
+    
+    def unwrap(self):
+        return self.chrom, self.start, self.end, *self.args
 
 
 def check_regions_file(regions_file):
@@ -96,44 +138,60 @@ def _make_fixed_size_windows(*,
     add_id_process.wait()
 
 
-def _get_endpoints(allowed_chroms, *bedfiles):
+def stream_bedfile(bedfile):
 
-    def _get_endpoints_bedfile(bedfile, track_id):
+    with open(bedfile, 'r') as f:
+
+        for line in f:
+
+            if line.startswith('#'):
+                continue
+
+            cols = line.strip().split('\t')
+
+            if len(cols) < 3:
+                raise ValueError(f'Bedfile {bedfile} must have at least 3 columns')
+            
+            feature = '1' if len(cols) == 3 else cols[3]
+
+            chrom, start, end = cols[:3]
+            start = int(start); end = int(end)
+
+            yield chrom, start, end, feature
+
+
+def _get_endpoints(*bedfiles):
+
+    def _iter_endpoints_bedfile(bedfile, track_id):
+        # okay the problem is that this is not current sorted ...
+        for chrom, start, end, feature in stream_bedfile(bedfile):
+            yield chrom, start, end - start, track_id, feature, True
+            yield chrom, end, 0, track_id, feature, False
+
+    def trace(x):
+        return x
+
+    def ordered_endpoints(bedfile, track_id):
+        return map(lambda x : (x[0],x[1],x[3],x[4],x[5]),
+            chain.from_iterable(buffered_aggregator(
+                _iter_endpoints_bedfile(bedfile, track_id),
+                has_lapsed = lambda x, y : x[0] != y[0] or ( (x[1] - (y[1] + y[2])) > 0 and x[-1]),
+                key = lambda x : (x[0], x[1]),
+                order_key = lambda x : (x[0], x[1]),
+            ))
+        )
+
+    #for bedfile in bedfiles:
+    #    for a in sorted_iterator( ordered_endpoints(bedfile, 'yeah'), key = lambda x : (x[0],x[1]) ):
+    #        pass
+    #assert False
+
+    endpoints = [ordered_endpoints(bedfile, os.path.basename(bedfile)) for bedfile in bedfiles]
     
-        with open(bedfile, 'r') as f:
-
-            for line in f:
-
-                if line.startswith('#'):
-                    continue
-
-                cols = line.strip().split('\t')
-
-                if len(cols) < 3:
-                    raise ValueError(f'Bedfile {bedfile} must have at least 3 columns')
-                
-                feature = '1' if len(cols) == 3 else cols[3]
-
-                chrom, start, end = cols[:3]
-                start = int(start); end = int(end)
-                
-                if chrom in allowed_chroms:
-                    yield chrom, start, track_id, feature, True
-                    yield chrom, end, track_id, feature, False
-
-    endpoints = (
-        endpoint
-        for bedfile in bedfiles
-        for endpoint in _get_endpoints_bedfile(bedfile, os.path.basename(bedfile))
-    )
-    
-    return sorted(
-        endpoints,
-        key = lambda x : (x[0], x[1]),
-    )
+    return interleave_streams(*endpoints, key = lambda x : (x[0], x[1]))
 
 
-def _endpoints_to_regions(endpoints, min_windowsize = 4): # change default min_windowsize 3 to 4
+def _endpoints_to_segments(endpoints): # change default min_windowsize 3 to 4
 
     active_features = Counter()
     feature_combination_ids = dict()
@@ -178,20 +236,50 @@ def _endpoints_to_regions(endpoints, min_windowsize = 4): # change default min_w
         prev_pos = pos; prev_chrom = chrom
 
 
+def format_bed12_record(region_id, segments):
+
+    chrs, starts, ends = list(zip(*segments))
+            
+    region_start=min(starts); region_end=max(ends)
+    region_chr = chrs[0]
+    num_blocks = len(segments)
+    
+    block_sizes = ','.join(map(lambda x : str(x[0] - x[1]), zip(ends, starts)))
+    block_starts = ','.join(map(lambda s : str(s - region_start), starts))
+
+    return (
+            region_chr,    # chr
+            region_start,  # start
+            region_end,    # end
+            region_id,     # name
+            '0','+',       # value, strand
+            region_start,  # thickStart
+            region_start,  # thickEnd
+            '0,0,0',       # itemRgb,
+            num_blocks,    # blockCount
+            block_sizes,   # blockSizes
+            block_starts,  # blockStarts
+        )
+
+def expand_args(func):
+    def wrapper(x):
+        return func(*x)
+    return wrapper
+
 def make_windows(
     *bedfiles,
     genome_file, 
     window_size, 
     blacklist_file, 
     output=sys.stdout, 
-    min_windowsize=12,
+    min_windowsize=50,
 ):
-    
-    windowsizes=[]
-
     logger.info(f'Checking sort order of bedfiles ...')
-    for bedfile in bedfiles:
-        subprocess.run(["sort", "-k1,1", "-k2,2n", "--check", bedfile], check=True)
+    #for bedfile in bedfiles:
+    #    try:
+    #        subprocess.run(["sort", "-k1,1", "-k2,2n", "--check", bedfile], check=True)
+    #    except subprocess.CalledProcessError:
+    #        raise ValueError(f'Bedfile {bedfile} is not sorted by chromosome and start position.')
 
     allowed_chroms=[]
     with open(genome_file,'r') as f:
@@ -202,9 +290,17 @@ def make_windows(
             allowed_chroms.append(line.strip().split('\t')[0].strip())
 
     logger.info(f'Using chromosomes: {", ".join(allowed_chroms)}')
-    
-    with tempfile.NamedTemporaryFile('w') as windows_file, \
-        tempfile.NamedTemporaryFile('w') as pre_blacklist_file:
+    window_sizes=[]
+    n_windows_written=[0]
+
+    def accumulate_windowsizes(r):
+        window_sizes.append(sum(map(lambda s : s[2] - s[1], r)))
+        n_windows_written[0]+=1
+        if n_windows_written[0] % 10000 == 0:
+            logger.info(f'Wrote {n_windows_written[0]} windows ...')
+        return r
+
+    with tempfile.NamedTemporaryFile('w') as windows_file:
 
         logger.info(f'Making initial coarse-grained regions ...')
         _make_fixed_size_windows(
@@ -214,77 +310,62 @@ def make_windows(
         )
         windows_file.flush()
         
+        '''
+        Welllll..... what's going on here? I promise, it's beautiful in principle
+        and only ugly in practice. If python had better syntax for functional programming
+        and streaming iterators, this would look like a nice clean pipeline. Here it is in
+        a more straightforward form:
+
+        get_endpoints(*bedfiles) => map(filter_chroms(allowed_chroms)) => collect_to_segments \
+            => map(convert_to_RegionOverlapComparitor) => filter_intersection(blacklist_file) \
+            => map(unwrap_from_RegionOverlapComparitor) => collect_to_regions \
+            => map(chop_to<chrom,start,end>) \
+            => map(filter(min_windowsize)) => enumerate => map(format_bed12_record) \
+            => write_to_output
+
+        So why do it this way? Because this massive transformation is defined in terms of 
+        lazy iterators, it's memory overhead is very small. This is important because 
+        it means you can use an obscenely dense feature landscape without running out of memory.
+        '''
         logger.info(f'Segmenting genome based on feature tracks ...')
-        for region in _endpoints_to_regions(
-            _get_endpoints(
-                allowed_chroms,
-                windows_file.name,
-                *bedfiles,
-            )
-        ):
-            print(*region, sep='\t', file=pre_blacklist_file)
-        pre_blacklist_file.flush()
-
-        logger.info(f'Removing blacklist regions ...')
-        subract_process = subprocess.Popen(
-            ['bedtools', 'subtract', '-a', pre_blacklist_file.name, '-b', blacklist_file],
-            stdout=subprocess.PIPE,
-            universal_newlines=True,
-            bufsize=10000,
-        )
-
-        id_map = {}
-        regions_collection = defaultdict(list)
-
-        for line in subract_process.stdout:
-            chr, start, end, window_id = line.strip().split('\t')
-            window_id = id_map.setdefault(window_id, len(id_map))
-            regions_collection[window_id].append((chr, int(start), int(end)))
-
-        subract_process.wait()
-
-        logger.info(f'Writing final region set ...')
-        
-        windows_written=0
-        for window_id, regions in regions_collection.items():
-            
-            chrs, starts, ends = list(zip(*regions))
-            
-            region_start=min(starts); region_end=max(ends)
-            region_chr = chrs[0]
-            num_blocks = len(regions)
-            region_len = sum(map(lambda x : x[0] - x[1], zip(ends, starts)))
-            
-            if region_len < min_windowsize:
-                continue
-            
-            windowsizes.append(region_len)
-            block_sizes = ','.join(map(lambda x : str(x[0] - x[1]), zip(ends, starts)))
-            block_starts = ','.join(map(lambda s : str(s - region_start), starts))
-
-            print(region_chr,    # chr
-                  region_start,  # start
-                  region_end,    # end
-                  windows_written,     # name
-                  '0','+',       # value, strand
-                  region_start,  # thickStart
-                  region_start,  # thickEnd
-                  '0,0,0',       # itemRgb,
-                  num_blocks,    # blockCount
-                  block_sizes,   # blockSizes
-                  block_starts,  # blockStarts
-                  sep='\t', 
-                  file=output
-            )
-            windows_written+=1
+        for bed12_record in \
+                    map(expand_args(format_bed12_record),
+                    enumerate(
+                    map(accumulate_windowsizes, # this is here just to count the windows as they pass by. No transformation occurs.
+                    filter(lambda r : sum(map(lambda s : s[2] - s[1], r)) > min_windowsize,
+                    map(lambda r : list(map(lambda s : s[:3], r)),
+                    buffered_aggregator(
+                        map(RegionOverlapComparitor.unwrap,
+                            filter_intersection(
+                                map(expand_args(RegionOverlapComparitor),
+                                    _endpoints_to_segments(
+                                        filter(
+                                            lambda x : x[0] in allowed_chroms,
+                                            _get_endpoints(
+                                                windows_file.name,
+                                                *bedfiles,
+                                            )
+                                        )
+                                    )
+                                ),    
+                                map(expand_args(RegionOverlapComparitor),
+                                    stream_bedfile(blacklist_file)
+                                ),
+                            ),
+                        ),
+                        has_lapsed = lambda x, y : x[0] != y[0] or x[1] - y[1] > window_size*2,
+                        key = lambda x : x[3],
+                        order_key = lambda x : (x[0], x[1]),
+                    )))))):
+            print(*bed12_record, sep='\t', file=output)  
 
     q=(0.1, 0.25, 0.5, 0.75, 0.9)
-    windowsize_dist=quantile(windowsizes, q)
+    windowsize_dist=quantile(window_sizes, q)
     print(
 f'''Window size report
 ------------------
-Num windows   | {len(windowsizes)}
-Smallest      | {min(windowsizes)}
-Largest       | {max(windowsizes)}    
+Num windows   | {len(window_sizes)}
+Smallest      | {min(window_sizes)}
+Largest       | {max(window_sizes)}    
 ''' + '\n'.join(('Quantile={: <4} | {}'.format(str(k),str(int(v))) for k,v in zip(q, windowsize_dist)))
     )
